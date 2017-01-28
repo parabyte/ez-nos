@@ -1,0 +1,36 @@
+John AA9VT reported an smtp trace leakage in Linux Jnos, and here's the
+fix.  This applies to Jnos 1.11f and many prior versions.  The trace msgs
+were appearing outside the Command session, when the smtp trace value was
+2 or greater.  Best of all, the fix takes less code space than the original!
+I haven't tried this under MSDOS...but tracing there was often sub-optimal.
+-- James n5knx
+======================================================================= 
+*** smtpcli.c.orig	Sat Jun 26 23:40:33 1999
+--- smtpcli.c	Wed Feb 14 22:36:57 2001
+***************
+*** 1274,1286 ****
+      va_list args;
+  
+      va_start(args,fmt);
+  #ifdef  SMTPTRACE
+!     if(Smtptrace>1){
+!         printf("smtp sent: ");
+!         vprintf(fmt,args);
+!     }
+  #endif
+-     vsprintf(cb->buf,fmt,args);
+      usputs(cb->s,cb->buf);
+      va_end(args);
+  }
+--- 1274,1284 ----
+      va_list args;
+  
+      va_start(args,fmt);
++     vsprintf(cb->buf,fmt,args);
+  #ifdef  SMTPTRACE
+!     if(Smtptrace>1)
+!         printf("smtp sent: %s", cb->buf);
+  #endif
+      usputs(cb->s,cb->buf);
+      va_end(args);
+  }

@@ -1,0 +1,228 @@
+#
+# I must be nuts... JNOS port to Linux
+# Needless to say, this is just begging for trouble
+#
+# Why this instead of WAMPES?  I want a nice, strict firewall between the
+# packet users and the rest of the system.  Unfortunately, WAMPES spawns login
+# for all incoming connects (and doesn't work too nicely with DOS versions,
+# since they default to line mode and local echo) and expects the system to
+# provide services such as SMTP.  Sorry guys, I won't buy it....
+#
+# ++bsa (bsa@kf8nh.wariat.org) 01/19/93
+# Mods for Jnos 1.11 1/97 by N5KNX <jpd@usl.edu>
+
+CC = gcc
+RM = rm -f
+AR = ar rcs
+
+#
+# Known patches are:
+#
+# -DNO_STRTOUL		System has no strtoul()
+# -DNO_GETTOD		System uses ftime() instead of gettimeofday()
+# -DNO_STRCASECMP	We must supply strcasecmp()
+# -DNO_STRNCASECMP	No strncasecmp() (may not be tied to NO_STRCASECMP)
+# -D__BYTE_ORDER=__LITTLE_ENDIAN	Intel byte ordering, vs. Motorola
+#
+# SCO needs NO_STRTOUL, NO_GETTOD, NO_STRCASECMP, NO_STRNCASECMP, __BYTE_ORDER=__LITTLE_ENDIAN
+# Be aware that the non-LITTLE_ENDIAN code has not yet been tested; and that
+# kernel.c/ksubr.c will need definitions for thread switching on such systems.
+#
+PATCHES = 
+
+#
+# Your curses library.  Linux wants ncurses; System V wants curses; BSD wants
+# curses, termcap, and major work to substitute for missing features in BSD
+# curses.  (Or install ncurses.)
+#
+# Slackware 1.1.0 and later use the convention of the ncurses headers with the
+# traditional names in /usr/include/ncurses; sources compiled for BSD curses
+# compile as is, for ncurses sources use -I/usr/include/ncurses and the source
+# need not be changed.  This is a Good Thing.  (If you're not using ncurses,
+# you don't need the ICURSES line.)  If your ncurses isn't installed that way,
+# you may want to edit curses.c to use ncurses.h instead of curses.h and use
+# -I/usr/local/include and -L/usr/local/lib here, or whatever you used to
+# install ncurses.
+#
+# Note by n5knx:
+# Jnos 1.11c has been tested under RedHat 5.0 with ncurses 1.9.9e, 4.0 and 4.2,
+# and all seem OK now that I've increased stack sizes to accommodate these
+# ncurses versions.
+# See tips in readme.lnx about how to build your own ncurses version if you
+# elect to do so.
+ICURSES = -I/usr/include/ncurses
+LCURSES = -lncurses
+#ICURSES = -I/usr/local/src/ncurses_1.8.5/src
+#LCURSES = /usr/local/src/ncurses_1.8.5/src/libncurses.a
+#ICURSES = -I/usr/local/src/ncurses-4.0/include
+#LCURSES = /usr/local/src/ncurses-4.0/lib/libncurses.a
+#ICURSES = -I/usr/local/src/ncurses-4.2/include
+#LCURSES = /usr/local/src/ncurses-4.2/lib/libncurses.a
+
+#
+# Warnings --- disable for less noise, enable for more certainty :-)  gcc will
+# whine about things like partly bracketed initializers if you specify -W, but
+# this can be ignored unless you're trying to port JNOS to VMS....
+#
+# JNOS/Linux is much cleaner in this area, but there are some portability
+# warnings still (-Wtraditional) and some non-globally-prototyped functions.
+#
+WARNINGS = -W -Wimplicit -Wreturn-type -Wunused -Wswitch -Wpointer-arith \
+	   -Wcast-qual -Wcast-align -Waggregate-return -Wparentheses \
+	   -Wuninitialized -Wformat -Wtraditional -Wconversion \
+	   -Wstrict-prototypes -Wmissing-prototypes
+
+# This is for my use in testing.  Don't worry about it unless you want to be
+# able to build custom versions.
+NOS = eznos
+
+# I strongly advise leaving the debugging information in, because this is NOT
+# production-quality code.  -g1 instead of -g3 will make nos smaller, however,
+# and leaving off -g entirely will make it a LOT smaller (or use 'strip').
+# Using -static will aid gdb in tracing failures in libc routines, at the
+# expense of a larger binary.
+DEBUG = -static -g3  ## -DHOLD_PARSER=\"/usr/local/bin/scanjmsg\"
+DBGLIB = #-lg
+
+CFLAGS = -DUNIX $(DEBUG) $(PATCHES) $(WARNINGS) $(ICURSES) \
+	 -DLCURSES=\"$(LCURSES)\"  -O2
+
+all:    hardware.h $(NOS) u2j dumpdate
+
+hardware.h: unix.h
+	cp unix.h hardware.h
+
+CLIENTS= telnet.o ftpcli.o finger.o smtpcli.o hop.o \
+        tip.o nntpcli.o dialer.o rlogin.o callcli.o \
+        mailcli.o pop2cli.o pop3cli.o rdate.o look.o
+
+SERVERS= ttylink.o ftpserv.o smisc.o smtpserv.o convers.o \
+	nntpserv.o fingerd.o mboxcmd.o mailbox.o mboxfile.o \
+	mboxmail.o mboxgate.o mailfor.o  bmutil.o forward.o \
+	tipmail.o mailutil.o index.o expire.o calldbd.o \
+	buckbook.o pop2serv.o pop3serv.o timed.o \
+	qrz.o fbbfwd.o lzhuf.o term.o tcpgate.o http.o
+
+BOOTP=	bootp.o bootpd.o bootpcmd.o bootpdip.o
+
+INTERNET= tcpcmd.o tcpuser.o tcptimer.o tcpout.o tcpin.o \
+	tcpsubr.o tcphdr.o udpcmd.o udp.o udphdr.o \
+	domain.o domhdr.o ripcmd.o rip.o \
+	ipcmd.o ip.o iproute.o iphdr.o \
+	icmpcmd.o icmp.o icmpmsg.o icmphdr.o \
+	arpcmd.o arp.o arphdr.o rarp.o \
+	netuser.o rspf.o rspfcmd.o rspfhdr.o
+
+AX25=   ax25cmd.o ax25user.o ax25.o axheard.o ax25aar.o \
+	lapbtime.o lapb.o kiss.o kisspoll.o ax25subr.o ax25hdr.o \
+	ax25mail.o axui.o
+
+NETROM=	nrcmd.o nr4user.o nr4timer.o nr4.o nr4subr.o nr4hdr.o \
+	nr3.o nrs.o nrhdr.o nr4mail.o
+
+PPP=	asy.o ppp.o pppcmd.o pppfsm.o ppplcp.o \
+	ppppap.o pppipcp.o pppdump.o \
+	slhc.o slhcdump.o slip.o
+
+NET=	ftpsubr.o sockcmd.o sockuser.o socket.o sockutil.o  \
+	iface.o timer.o ttydriv.o cmdparse.o \
+	mbuf.o misc.o pathname.o audit.o files.o  \
+	kernel.o ksubr.o getopt.o wildmat.o lzw.o \
+	devparam.o md5.o
+
+DUMP= 	trace.o rspfdump.o \
+	kissdump.o ax25dump.o arpdump.o nrdump.o rwhodump.o \
+	ipdump.o icmpdump.o udpdump.o tcpdump.o ripdump.o
+
+# at and xmodem, at least, don't really belong here....
+UNIX=	unix.o unixasy.o dirutil.o at.o lcsum.o curses.o xmodem.o glob.o \
+	sessmgr.o dumbcons.o rawcons.o editor.o
+
+$(NOS): main.o config.o version.o session.o clients.a servers.a internet.a \
+	net.a netrom.a ax25.a unix.a dump.a ppp.a bootp.a
+	$(CC) -c $(CFLAGS) version.c
+	$(CC) $(CFLAGS) -o $(NOS) main.o config.o version.o session.o \
+		clients.a servers.a net.a internet.a net.a netrom.a \
+		unix.a ax25.a dump.a ppp.a bootp.a $(LCURSES) $(DBGLIB)
+# net.a is specified twice, above, due to some mutual dependencies with internet.a
+# and this is one way to deal with the single-pass library search argorithm.
+
+# mail2ind	produces a utility to look for bids, dump indices, salvage sequence.seq...
+mail2ind:	mail2ind.o index.o glob.o wildmat.o
+	$(CC) $(CFLAGS) -DMAIL2IND mail2ind.o index.c glob.o wildmat.o -o mail2ind
+	rm -f index.o
+
+# dumpdate  produces a program which displays longint dates in several files
+dumpdate:	 dumpdate.o
+	$(CC) $(CFLAGS) dumpdate.o -o dumpdate
+
+# epass  produces a program which converts a challenge and passwd to MD5 format
+epass:	epass.c md5.o
+	$(CC) $(CFLAGS) -DMD5AUTHENTICATE epass.c md5.o -o epass
+
+# pushmail  produces the program that moves some of mqueue to another system
+pushmail:	pushmail.o glob.o wildmat.o
+	$(CC) $(CFLAGS) pushmail.o glob.o wildmat.o -o pushmail
+
+# u2j	produces program to feed jnos email from Linux
+u2j:	u2j.o
+	$(CC) $(CFLAGS) u2j.o -o u2j
+	echo "YOU MUST EDIT u2j.c TO SPECIFY WHERE JNOS mqueue IS LOCATED"
+
+# scanjmsg	produces program to scan incoming bulletins for suitable content
+scanjmsg:	scanjmsg.o getopt.o
+	$(CC) $(CFLAGS) scanjmsg.o getopt.o -o scanjmsg
+	echo "YOU MUST EDIT scanjmsg.c TO SPECIFY WHERE scanjmsg.dat IS LOCATED"
+
+clean:
+	$(RM) *.[oa] hardware.h
+
+clients.a: $(CLIENTS)
+	$(RM) clients.a
+	$(AR) clients.a $(CLIENTS)
+
+servers.a: $(SERVERS)
+	$(RM) servers.a
+	$(AR) servers.a $(SERVERS)
+
+ppp.a: $(PPP)
+	$(RM) ppp.a
+	$(AR) ppp.a $(PPP)
+
+bootp.a: $(BOOTP)
+	$(RM) bootp.a
+	$(AR) bootp.a $(BOOTP)
+
+internet.a: $(INTERNET)
+	$(RM) internet.a
+	$(AR) internet.a $(INTERNET)
+
+ax25.a: $(AX25)
+	$(RM) ax25.a
+	$(AR) ax25.a $(AX25)
+
+netrom.a: $(NETROM)
+	$(RM) netrom.a
+	$(AR) netrom.a $(NETROM)
+
+net.a: $(NET)
+	$(RM) net.a
+	$(AR) net.a $(NET)
+
+dump.a: $(DUMP)
+	$(RM) dump.a
+	$(AR) dump.a $(DUMP)
+
+unix.a: $(UNIX)
+	$(RM) unix.a
+	$(AR) unix.a $(UNIX)
+
+depend: hardware.h
+	makedepend -- $(CFLAGS) -- $(CLIENTS:o=c) $(SERVERS:o=c) \
+		$(BOOTP:o=c) $(INTERNET:o=c) $(AX25:o=c) $(NETROM:o=c) \
+		$(PPP:o=c) $(NET:o=c) $(DUMP:o=c) $(UNIX:o=c) main.c version.c\
+		config.c session.c u2j.c dumpdate.c pushmail.c mail2ind.c epass.c
+
+# FOLLOWING LINES CREATED BY RUNNING 'make depend'.
+# DO NOT DELETE
+

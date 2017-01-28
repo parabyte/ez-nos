@@ -1,0 +1,673 @@
+#****************************************************************
+#
+#  Makefile for KA9Q TCP/IP package for PC clones with Turbo C
+#  For WG7J's JNOS v1.10k
+#
+#****************************************************************
+#
+#with many people now using disk compression (like Dblspace, Stacker, etc)
+#there isn't much to gain from compressing the executable. If you want
+#pklite/lzexe compression anyway, uncomment the following line and set
+#PACKER to the name of your compression utility.
+#PACK = 1
+#PACKER=C:\drdos\pklite
+
+
+#DEFINE YOUR COMPILER AND PROCESSOR TYPE HERE !!!
+
+#VALID COMPILERS are: TC2, BC2, BC3, BC4
+#NOTE-1: While we predefine OPT, below, to specify optimization, you
+#      may wish to disable this if you encounter strange behaviour.
+#      Various versions of Borland compilers don't optimize correctly,
+#      and there may be patches to the compiler to fix it, too.
+#NOTE-2: The compiler path needs to be set in the PATH statement
+#      below in this makefile. It is set for the default paths for
+#      compiler installation on drive C, but should be modified if
+#      you use a different setup!  If you DON'T modify the path properly,
+#      you may get this error msg: "Fatal: command arguments too long"!
+
+COMPILER = BC3
+
+
+#VALID PROCESSORS are: 8086, 80186, 80286, 80386, 80486, PENTIUM
+# NOTE: 80486/PENTIUM is for BC4 and is NOT tested!!!
+# NOTE2: CPU validity for the compiler is NOT checked !!!
+# NOTE3: 80286 compiles seem to cause problems. 80286 is hardcode below
+#        to generate 80186 code !
+# TC2 supports 8086, 80186
+# BC2 supports 8086, 80186, 80286
+# BC3 supports 8086, 80186, 80286, 80386
+# BC4 supports 8086, 80186, 80286, 80386, 80486, PENTIUM
+
+PROCESSOR = 80386
+# NOTE: When you change the above specification, remove all *.obj files
+# before running 'make', to be sure that all modules are recompiled.
+
+#************************************************************************
+#DEFINE THE MINIMUM SIZE OF DATA ELEMENTS FORCED IN SEPARATE
+#SEGMENTS HERE (ie. the -Ff=  option). This is only for BC2 and later!
+
+DATASIZE=511
+
+#
+#Modify the compiler path if you've installed other than the default
+#
+
+!if ($(COMPILER) == TC2)
+PATH=c:\d\tc
+CC=$(PATH)\tcc +bcc.cfg
+OPT=-G -O -Z
+
+!elif ($(COMPILER) == BC2)
+PATH=c:\borlandc
+CC=$(PATH)\bin\bcc +bcc.cfg
+OPT=-G- -O -Z-
+
+!elif ($(COMPILER) == BC3)
+PATH=c:\borlandc
+CC=$(PATH)\bin\bcc +bcc.cfg
+OPT=-O1 -Z
+
+!elif ($(COMPILER) == BC4)
+PATH=c:\bc45
+CC=$(PATH)\bin\bcc +bcc.cfg
+OPT=-O1 -Z
+# Following variant from PE1NMB for 386, seems to have some problems ... why?
+#OPT=-O1 -Z -R- -RT- -x- -xd- -a2 -N- -v- -y- -dc-
+
+!endif
+
+#You should NOT have to touch anything below .
+#************************************************************************
+#************************************************************************
+#************************************************************************
+
+!if ($(PROCESSOR) == 8086)
+!if ($(COMPILER) == BC4)
+CPUCFLAG=-1-
+!else
+CPUCFLAG=
+!endif
+CPUAFLAG=
+CPUTYPE=CPU86
+
+!elif ($(PROCESSOR) == 80186)
+CPUCFLAG=-1
+CPUAFLAG=-j.186
+CPUTYPE=CPU186
+
+!elif ($(PROCESSOR) == 80286)
+#note that this is the same as 80186, due to reported problems
+#with the real 286 options
+CPUCFLAG=-1
+CPUAFLAG=-j.186
+CPUTYPE=CPU186
+
+!elif ($(PROCESSOR) == 80386)
+CPUCFLAG=-3
+CPUAFLAG=-j.386
+CPUTYPE=CPU386
+
+!elif ($(PROCESSOR) == 80486)
+CPUCFLAG=-4
+CPUAFLAG=-j.386
+CPUTYPE=CPU486
+
+!elif ($(PROCESSOR) == PENTIUM || $(PROCESSOR) == 80586)
+CPUCFLAG=-5
+CPUAFLAG=-j.386
+CPUTYPE=CPU586
+
+!endif
+
+
+!if ($(COMPILER) != TC2)
+DSEGOPT=-Ff=$(DATASIZE)
+# Let's enable autodepend in case 'make depend' is not current:
+.autodepend
+!endif
+
+##############################################################################
+# for all Borland (tc and bcc) compilers
+TMPNAM=tmpnam
+
+
+ASM=$(PATH)\bin\tasm
+LIB=$(PATH)\bin\tlib
+RM=del
+AR=zip
+
+BASECFLAGS=-a -d -f- -w+ -w-par -w-aus -w-use -w-pin -w-asm -DMSDOS
+BASEAFLAGS=-mx -t -DMEMMOD=LARGE
+MODEL=-ml
+
+
+CFLAGS=$(BASECFLAGS) $(CPUCFLAG) $(OPT) $(DSEGOPT) -D$(CPUTYPE)
+AFLAGS=$(BASEAFLAGS) $(CPUAFLAG)
+
+
+all:    warnings bcc.cfg eznos.exe
+
+#make the configuration file for the compiler
+bcc.cfg: makefile
+  copy &&|
+$(MODEL) $(CFLAGS)
+-I$(PATH)\INCLUDE;.
+-L$(PATH)\LIB
+| bcc.cfg
+
+#issue some warnings for certain options
+warnings:
+!if ($(COMPILER) == TC2) || ($(COMPILER) == BC2)
+    @echo WARNING: TC2 or BC2 might NOT compile JNOS without errors...
+!endif
+!if ($(CPUTYPE) == CPU586)
+    @echo WARNING: PENTIUM compiles have NOT been tested...
+!endif
+    @echo Making a $(PROCESSOR) JNOS using $(COMPILER) compiler...
+    @echo Datasize is set to $(DATASIZE)
+
+
+# Define PC-specific include file
+hardware.h: pc.h
+	copy pc.h hardware.h
+
+!ifdef ($(COMPILER == TC2))
+#for Turbo C 2.0
+.c.obj:
+    $(CC) -c $<
+
+!else
+#for BC++ 2 & 3 & 4
+.c.obj:
+    $(CC) -c {$< }
+
+!endif
+
+.asm.obj:
+	$(ASM) $(AFLAGS) $<;
+
+sccvec.obj: sccvec.asm
+	$(ASM) $(AFLAGS)  sccvec.asm;
+
+!if ($(TMPNAM) == tmpnam)
+mkname.obj: mkname.c global.h
+	$(CC) -c -zC_TEXT $*.c
+!else
+mkname.obj: mkname.c global.h
+	$(CC) -c $*.c
+!endif
+
+CLIENTS= telnet.obj ftpcli.obj finger.obj smtpcli.obj hop.obj \
+        tip.obj nntpcli.obj dialer.obj rlogin.obj callcli.obj \
+        mailcli.obj pop2cli.obj pop3cli.obj rdate.obj look.obj
+
+SERVERS= ttylink.obj ftpserv.obj smisc.obj smtpserv.obj convers.obj \
+	nntpserv.obj fingerd.obj mboxcmd.obj mailbox.obj mboxfile.obj \
+	mboxmail.obj mboxgate.obj mailfor.obj  bmutil.obj forward.obj \
+	tipmail.obj mailutil.obj index.obj expire.obj calldbd.obj \
+	buckbook.obj pop2serv.obj pop3serv.obj timed.obj sam.obj \
+	samlib.obj qrz.obj fbbfwd.obj lzhuf.obj term.obj tcpgate.obj http.obj
+
+BOOTP=  bootp.obj bootpd.obj bootpcmd.obj bootpdip.obj
+
+INTERNET= tcpcmd.obj tcpuser.obj tcptimer.obj tcpout.obj tcpin.obj \
+	tcpsubr.obj tcphdr.obj udpcmd.obj udp.obj udphdr.obj \
+	domain.obj domhdr.obj ripcmd.obj rip.obj \
+	ipcmd.obj ip.obj iproute.obj iphdr.obj \
+	icmpcmd.obj icmp.obj icmpmsg.obj icmphdr.obj \
+	arpcmd.obj arp.obj arphdr.obj rarp.obj \
+	netuser.obj rspf.obj rspfcmd.obj rspfhdr.obj
+
+AX25=   ax25cmd.obj ax25user.obj ax25.obj axheard.obj ax25aar.obj \
+	lapbtime.obj lapb.obj kiss.obj kisspoll.obj ax25subr.obj ax25hdr.obj \
+	ax25mail.obj axui.obj
+
+NETROM= nrcmd.obj nr4user.obj nr4timer.obj nr4.obj nr4subr.obj nr4hdr.obj \
+	nr3.obj nrs.obj nrhdr.obj nr4mail.obj
+
+PPP=    asy.obj ppp.obj pppcmd.obj pppfsm.obj ppplcp.obj \
+	ppppap.obj pppipcp.obj pppdump.obj \
+	slhc.obj slhcdump.obj slip.obj
+
+NET=    ftpsubr.obj sockcmd.obj sockuser.obj socket.obj sockutil.obj  \
+	iface.obj timer.obj ttydriv.obj cmdparse.obj \
+	mbuf.obj misc.obj pathname.obj audit.obj files.obj  \
+	kernel.obj ksubr.obj alloc.obj getopt.obj wildmat.obj lzw.obj \
+	devparam.obj md5.obj
+
+DUMP=   trace.obj enetdump.obj arcdump.obj rspfdump.obj  \
+	kissdump.obj ax25dump.obj arpdump.obj nrdump.obj rwhodump.obj \
+	ipdump.obj icmpdump.obj udpdump.obj tcpdump.obj ripdump.obj
+
+PCOBJS= pc.obj dirutil.obj eccmd.obj ec.obj pktdrvr.obj enet.obj hapn.obj \
+	hs.obj pc100.obj eagle.obj drsi.obj drsivec.obj pi.obj mkname.obj \
+	z8530.obj i8250.obj ecvec.obj pkvec.obj asyvec.obj hsvec.obj \
+	pc100vec.obj eaglevec.obj hapnvec.obj command.obj pivec.obj \
+	scc.obj sccvec.obj pcgen.obj sw.obj stopwatc.obj arcnet.obj at.obj \
+	gracilis.obj twin_at.obj twin_dr.obj twinvec.obj stktrace.obj \
+	xmodem.obj bpq.obj bpqcmd.obj editor.obj ted2.obj
+
+MEMMGR= xms.obj xmsutil.obj memlib.obj
+
+EXPERIMENTS= video.obj test.obj sendfax.obj bmconv.obj dbf.obj
+
+# mail2ind  dumps .ind files, displays highest msgid...
+mail2ind: mail2ind.exe
+#
+mail2ind.exe: mail2ind.obj index.c
+    $(CC) -M -DMAIL2IND mail2ind.obj index.c
+    del index.obj
+!if $(PACK)
+    -$(PACKER) mail2ind.exe
+    -del mail2ind.old
+!endif
+
+# mkdep  produces the program that scans src for include file references
+mkdep: mkdep.exe
+
+mkdep.exe: mkdep.c
+	$(CC) mkdep.c
+!if $(PACK)
+    -$(PACKER) mkdep.exe
+    -del mkdep.old
+!endif
+
+# memlog  produces the program that analyzes memlog.dat (see config.h)
+memlog: memlog.exe
+
+memlog.exe: memlog.c
+	$(CC) memlog.c
+!if $(PACK)
+    -$(PACKER) memlog.exe
+    -del memlog.old
+!endif
+
+# makelist  produces a program to display an include file reference tree, etc.
+makelist: makelist.exe
+
+makelist.exe:   makelist.obj getopt.obj
+	$(CC) makelist.obj getopt.obj
+!if $(PACK)
+    -$(PACKER) makelist.exe
+    -del makelist.old
+!endif
+
+# dumpdate  produces a program which displays longint dates in several files
+dumpdate: dumpdate.exe
+
+dumpdate.exe: dumpdate.obj
+    $(CC) dumpdate.obj
+!if $(PACK)
+    -$(PACKER) dumpdate.exe
+    -del dumpdate.old
+!endif
+
+# epass  produces a program which converts a challenge and passwd to MD5 format
+# In Linux, do: echo "#define MD5AUTHENTICATE">global.h;gcc -O epass.c md5.c -o epass
+epass: epass.exe
+
+epass.exe: epass.obj md5.obj
+    $(CC) epass.obj md5.obj
+!if $(PACK)
+    -$(PACKER) epass.exe
+    -del epass.old
+!endif
+
+# pushmail  produces the program that moves some of mqueue to another system
+pushmail: pushmail.exe
+
+pushmail.exe: pushmail.c
+	$(CC) pushmail.c
+!if $(PACK)
+    -$(PACKER) pushmail.exe
+    -del pushmail.old
+!endif
+
+# uudecode  produces the program that uudecodes a file downloaded via DU mbox cmd 
+#           Much fancier uudecode programs exist ... this one is adequate.
+uudecode: uudecode.exe
+
+uudecode.exe: uudecode.c
+	$(CC) uudecode.c
+!if $(PACK)
+    -$(PACKER) uudecode.exe
+    -del uudecode.old
+!endif
+
+# base64  produces the base64 encoding of username:password for use in access (http)
+base64: base64.exe
+
+base64.exe: base64.c
+	$(CC) base64.c
+!if $(PACK)
+    -$(PACKER) base64.exe
+    -del base64.old
+!endif
+
+# mktl  produces the program that builds a .tl file for use with TLIB
+mktl: mktl.exe
+
+mktl.exe: mktl.c
+	$(CC) mktl.c
+!if $(PACK)
+    -$(PACKER) mktl.exe
+    -del mktl.old
+!endif
+
+
+eznos.exe: main.obj config.obj session.obj clients.lib servers.lib internet.lib \
+    net.lib netrom.lib ax25.lib pc.lib dump.lib ppp.lib bootp.lib \
+    memmgr.lib emmlibl.lib version.obj
+    $(CC) -c version.c
+    $(CC) -M -f- -eezserv -ll -lm -ln -ls main.obj config.obj version.obj session.obj *.lib
+!if $(PACK)
+    -$(PACKER) nos.exe
+    -del nos.old
+!endif
+
+xref.out: main.obj config.obj version.obj session.obj clients.lib servers.lib internet.lib \
+	net.lib netrom.lib ax25.lib pc.lib dump.lib ppp.lib
+    objxref /Oxref.out $(PATH)\lib\c0l.obj main.obj config.obj version.obj session.obj *.lib $(PATH)\lib\cl.lib
+
+clients.lib: $(CLIENTS) clients.tl
+    if exist clients.lib $(RM) clients.lib
+	$(LIB) /c clients.lib @clients.tl
+
+servers.lib: $(SERVERS) servers.tl
+    if exist servers.lib $(RM) servers.lib
+	$(LIB) /c servers.lib @servers.tl
+
+ppp.lib: $(PPP) ppp.tl
+    if exist ppp.lib $(RM) ppp.lib
+	$(LIB) /c ppp.lib @ppp.tl
+
+bootp.lib: $(BOOTP) bootp.tl
+    if exist bootp.lib $(RM) bootp.lib
+	$(LIB) /c bootp.lib @bootp.tl
+
+internet.lib: $(INTERNET) internet.tl
+    if exist internet.lib $(RM) internet.lib
+	$(LIB) /c internet.lib @internet.tl
+
+ax25.lib: $(AX25) ax25.tl
+    if exist ax25.lib $(RM) ax25.lib
+	$(LIB) /c ax25.lib @ax25.tl
+
+netrom.lib: $(NETROM) netrom.tl
+    if exist netrom.lib $(RM) netrom.lib
+	$(LIB) /c netrom.lib @netrom.tl
+
+net.lib: $(NET) net.tl
+    if exist net.lib $(RM) net.lib
+	$(LIB) /c net.lib @net.tl
+
+dump.lib: $(DUMP) dump.tl
+    if exist dump.lib $(RM) dump.lib
+	$(LIB) /c dump.lib @dump.tl
+
+pc.lib: $(PCOBJS) pc.tl
+    if exist pc.lib $(RM) pc.lib
+	$(LIB) /c pc.lib @pc.tl
+!if ($(COMPILER) == BC4)
+    $(LIB) /c pc.lib +$(PATH)\lib\compat\setjmp.obj
+!endif
+
+memmgr.lib: $(MEMMGR) memmgr.tl
+    if exist memmgr.lib $(RM) memmgr.lib
+    $(LIB) /c memmgr.lib @memmgr.tl
+
+# emmlibl.lib is distributed as emmlibl.bil to avoid accidental deletion!
+emmlibl.lib: emmlibl.bil
+    copy emmlibl.bil emmlibl.lib
+
+help:
+    zip -u help.zip \spool\help\*.hlp
+
+cmdshelp:
+    zip -u cmdshelp.zip \help\*
+
+docs:
+    zip docs help.zip nos.cfg readme.now mboxcmds.txt cmdsh???.zip
+
+clean:
+    if exist *.obj $(RM) *.obj
+    if exist *.lib $(RM) *.lib
+    $(RM) hardware.h
+
+realclean: clean
+    if exist *.exe $(RM) *.exe
+    if exist *.map $(RM) *.map
+
+# depend  produces mkdep.srt which is used to update this makefile's dependency list
+depend: mkdep hardware.h
+    if exist mkdep.tmp $(RM) mkdep.tmp
+    mkdep > mkdep.tmp
+    grep -v mkname.obj mkdep.tmp > mkdep.txt
+    grep -v ".h:" mkdep.txt > mkdep.tmp
+    sort mkdep.tmp > mkdep.srt
+    $(RM) mkdep.tmp
+    $(RM) mkdep.txt
+    echo mkdep.srt ready for merging with the makefile
+
+zip: docs
+    del *.bak
+    copy source.c source
+    $(AR) -Jr -o -ex -z -u nossrc.zip makefile.* readme.* mboxcmds.txt nos.cfg\
+        *.asm *.c *.h *.tl emmlibl.bil < source
+    $(AR) -o -u tools.zip *.bat unlink.c makefile.* docs.zip help.zip
+#    $(AR) -o -u nosobj.zip *.obj
+
+dist:
+    copy exe.c 1st.txt
+    arj a -je jnos 1st.txt docs.zip nos.exe
+
+global.h: config.h
+    touch global.h
+
+# this section generated by mkdep
+#
+alloc.obj: alloc.c global.h proc.h cmdparse.h mbuf.h socket.h daemon.h pc.h memlib.h xms.h
+arcdump.obj: arcdump.c global.h mbuf.h arcnet.h trace.h socket.h
+arcnet.obj: arcnet.c global.h mbuf.h iface.h timer.h arp.h ip.h arcnet.h
+arp.obj: arp.c global.h mbuf.h timer.h iface.h enet.h ax25.h icmp.h ip.h arp.h icmp.h rspf.h
+arpcmd.obj: arpcmd.c global.h mbuf.h timer.h internet.h ip.h enet.h ax25.h arp.h netuser.h cmdparse.h commands.h iface.h rspf.h socket.h domain.h session.h
+arpdump.obj: arpdump.c global.h mbuf.h arp.h netuser.h trace.h socket.h
+arphdr.obj: arphdr.c global.h mbuf.h arp.h
+asy.obj: asy.c global.h proc.h iface.h netuser.h slhc.h unixasy.h i8250.h asy.h ax25.h kiss.h pktdrvr.h ppp.h slip.h nrs.h commands.h mbuf.h
+at.obj: at.c global.h timer.h proc.h cmdparse.h socket.h commands.h
+audit.obj: audit.c global.h mbuf.h
+ax25.obj: ax25.c global.h mbuf.h iface.h arp.h slip.h ax25.h lapb.h netrom.h ip.h devparam.h trace.h pktdrvr.h netuser.h commands.h
+ax25aar.obj: ax25aar.c global.h mbuf.h timer.h iface.h ax25.h icmp.h ip.h arp.h icmp.h rip.h socket.h cmdparse.h
+ax25cmd.obj: ax25cmd.c global.h mbuf.h timer.h proc.h iface.h ax25.h lapb.h cmdparse.h socket.h mailbox.h session.h tty.h nr4.h commands.h pktdrvr.h netrom.h
+ax25dump.obj: ax25dump.c global.h mbuf.h proc.h ax25.h lapb.h trace.h socket.h
+ax25hdr.obj: ax25hdr.c global.h mbuf.h proc.h ax25.h
+ax25mail.obj: ax25mail.c global.h proc.h iface.h pktdrvr.h ax25.h usock.h socket.h session.h mailbox.h telnet.h ax25mail.h
+ax25subr.obj: ax25subr.c global.h mbuf.h timer.h proc.h ax25.h lapb.h
+ax25user.obj: ax25user.c global.h mbuf.h timer.h iface.h lapb.h ax25.h lapb.h
+axheard.obj: axheard.c global.h mbuf.h iface.h ax25.h ip.h timer.h
+axui.obj: axui.c global.h session.h smtp.h usock.h socket.h mailbox.h commands.h ax25.h pktdrvr.h iface.h
+bmconv.obj: bmconv.c global.h files.h
+bmutil.obj: bmutil.c unix.h global.h ftpserv.h smtp.h proc.h usock.h socket.h telnet.h timer.h session.h files.h mailbox.h cmdparse.h bm.h mailutil.h dirutil.h index.h bm.h mailbox.h
+bootp.obj: bootp.c global.h mbuf.h socket.h netuser.h udp.h iface.h ip.h internet.h domain.h rip.h cmdparse.h bootp.h commands.h
+bootpcmd.obj: bootpcmd.c global.h cmdparse.h bootpd.h netuser.h iface.h udp.h arp.h commands.h
+bootpd.obj: bootpd.c global.h bootp.h cmdparse.h iface.h mbuf.h proc.h socket.h bootpd.h udp.h ip.h arp.h netuser.h
+bootpdip.obj: bootpdip.c global.h arp.h iface.h mbuf.h netuser.h pktdrvr.h timer.h bootpd.h
+bpq.obj: bpq.c global.h mbuf.h proc.h iface.h ax25.h trace.h pktdrvr.h config.h bpq.h
+bpqcmd.obj: bpqcmd.c global.h config.h cmdparse.h socket.h session.h usock.h bpq.h trace.h
+buckbook.obj: buckbook.c global.h files.h config.h socket.h cmdparse.h ftp.h
+callbook.obj: callbook.c global.h files.h
+callcli.obj: callcli.c global.h mbuf.h socket.h session.h proc.h netuser.h commands.h tty.h
+calldbd.obj: calldbd.c global.h files.h mbuf.h socket.h session.h proc.h dirutil.h commands.h mailbox.h config.h
+cmdparse.obj: cmdparse.c global.h proc.h cmdparse.h session.h pktdrvr.h iface.h socket.h
+config.obj: config.c global.h config.h mbuf.h timer.h proc.h iface.h ip.h tcp.h udp.h arcnet.h lapb.h ax25.h enet.h kiss.h netrom.h nr4.h pktdrvr.h ppp.h slip.h arp.h icmp.h hardware.h smtp.h usock.h cmdparse.h commands.h mailbox.h mailcli.h ax25mail.h nr4mail.h tipmail.h bootp.h daemon.h slhc.h rspf.h main.h sessmgr.h trace.h devparam.h
+convers.obj: convers.c global.h mailbox.h netuser.h pktdrvr.h timer.h cmdparse.h usock.h socket.h session.h files.h mailutil.h commands.h
+curses.obj: curses.c hardware.h proc.h socket.h tty.h sessmgr.h config.h
+dbf.obj: dbf.c global.h dbf.h socket.h
+devparam.obj: devparam.c global.h devparam.h
+dialer.obj: dialer.c global.h mbuf.h timer.h proc.h iface.h netuser.h unixasy.h i8250.h asy.h tty.h session.h socket.h cmdparse.h devparam.h icmp.h files.h main.h trace.h commands.h
+dirutil.obj: dirutil.c global.h proc.h session.h dirutil.h commands.h
+domain.obj: domain.c global.h mbuf.h netuser.h ip.h socket.h cmdparse.h proc.h session.h domain.h commands.h files.h unix.h session.h
+domhdr.obj: domhdr.c global.h mbuf.h domain.h
+drsi.obj: drsi.c global.h mbuf.h iface.h pktdrvr.h netuser.h drsi.h ax25.h trace.h pc.h z8530.h devparam.h
+dumbcons.obj: dumbcons.c config.h hardware.h proc.h socket.h tty.h sessmgr.h
+eagle.obj: eagle.c global.h mbuf.h iface.h pktdrvr.h netuser.h eagle.h z8530.h ax25.h trace.h pc.h devparam.h
+ec.obj: ec.c global.h mbuf.h enet.h iface.h pktdrvr.h netuser.h ec.h arp.h trace.h pc.h
+eccmd.obj: eccmd.c global.h mbuf.h iface.h ec.h enet.h
+editor.obj: editor.c global.h proc.h socket.h session.h
+enet.obj: enet.c global.h mbuf.h iface.h arp.h ip.h enet.h
+enetdump.obj: enetdump.c global.h mbuf.h enet.h trace.h socket.h
+enethdr.obj: enethdr.c global.h mbuf.h enet.h
+epass.obj: epass.c md5.h files.h
+expire.obj: expire.c global.h timer.h proc.h bm.h files.h smtp.h socket.h index.h commands.h dirutil.h unix.h
+fbbfwd.obj: fbbfwd.c global.h bm.h mailbox.h mailutil.h smtp.h cmdparse.h proc.h socket.h timer.h usock.h netuser.h ax25.h netrom.h nr4.h files.h index.h lzhuf.h mailfor.h unix.h
+files.obj: files.c global.h netuser.h files.h mailbox.h md5.h
+finger.obj: finger.c global.h mbuf.h socket.h session.h proc.h netuser.h commands.h tty.h
+fingerd.obj: fingerd.c global.h files.h mbuf.h socket.h session.h proc.h smtp.h dirutil.h commands.h mailbox.h mailfor.h
+forward.obj: forward.c global.h bm.h mailbox.h smtp.h cmdparse.h proc.h socket.h timer.h usock.h netuser.h ax25.h netrom.h nr4.h files.h index.h commands.h session.h unix.h
+ftpcli.obj: ftpcli.c global.h mbuf.h session.h cmdparse.h proc.h tty.h socket.h mailbox.h ftp.h ftpcli.h commands.h netuser.h dirutil.h files.h config.h lzw.h
+ftpserv.obj: ftpserv.c global.h mbuf.h socket.h ftp.h ftpserv.h proc.h dirutil.h files.h commands.h config.h cmdparse.h mailutil.h lzw.h
+ftpsubr.obj: ftpsubr.c global.h mbuf.h socket.h proc.h mailbox.h bm.h ftp.h ftpcli.h
+getopt.obj: getopt.c global.h
+glob.obj: glob.c dirutil.h
+gracilis.obj: gracilis.c global.h mbuf.h iface.h gracilis.h
+hapn.obj: hapn.c global.h timer.h mbuf.h iface.h pktdrvr.h netuser.h hapn.h ax25.h trace.h pc.h proc.h
+hop.obj: hop.c global.h mbuf.h usock.h socket.h session.h timer.h proc.h netuser.h domain.h commands.h tty.h cmdparse.h ip.h icmp.h udp.h hardware.h
+hs.obj: hs.c global.h mbuf.h iface.h pktdrvr.h netuser.h hs.h z8530.h ax25.h trace.h pc.h proc.h devparam.h
+http.obj: http.c global.h files.h mbuf.h socket.h session.h proc.h dirutil.h commands.h mailbox.h netuser.h ftp.h smtp.h cmdparse.h domain.h
+i8250.obj: i8250.c global.h mbuf.h proc.h iface.h i8250.h asy.h devparam.h pc.h kisspoll.h
+icmp.obj: icmp.c global.h mbuf.h iface.h ip.h icmp.h netuser.h
+icmpcmd.obj: icmpcmd.c global.h icmp.h ip.h mbuf.h netuser.h internet.h timer.h socket.h proc.h session.h cmdparse.h commands.h usock.h mailbox.h
+icmpdump.obj: icmpdump.c global.h mbuf.h internet.h netuser.h icmp.h trace.h ip.h socket.h
+icmphdr.obj: icmphdr.c global.h mbuf.h internet.h ip.h icmp.h
+icmpmsg.obj: icmpmsg.c global.h
+iface.obj: iface.c global.h mbuf.h proc.h iface.h ip.h netuser.h ax25.h enet.h arp.h pktdrvr.h cmdparse.h commands.h nr4.h socket.h mailbox.h
+index.obj: index.c global.h socket.h index.h mailutil.h mailbox.h smtp.h files.h bm.h unix.h dirutil.h
+ip.obj: ip.c global.h mbuf.h timer.h internet.h netuser.h iface.h pktdrvr.h ip.h icmp.h
+ipcmd.obj: ipcmd.c global.h mbuf.h internet.h timer.h netuser.h iface.h session.h ip.h cmdparse.h commands.h rip.h rspf.h domain.h pktdrvr.h socket.h
+ipdump.obj: ipdump.c global.h mbuf.h internet.h iface.h ip.h trace.h netuser.h socket.h
+iphdr.obj: iphdr.c global.h mbuf.h ip.h internet.h
+iproute.obj: iproute.c global.h mbuf.h socket.h iface.h timer.h internet.h ip.h netuser.h icmp.h rip.h trace.h pktdrvr.h bootp.h
+kernel.obj: kernel.c global.h mbuf.h proc.h timer.h socket.h daemon.h hardware.h
+kiss.obj: kiss.c global.h mbuf.h iface.h kiss.h devparam.h slip.h asy.h ax25.h pktdrvr.h commands.h
+kissdump.obj: kissdump.c global.h mbuf.h kiss.h devparam.h ax25.h trace.h socket.h
+kisspoll.obj: kisspoll.c global.h slip.h kiss.h asy.h devparam.h kisspoll.h
+ksubr.obj: ksubr.c global.h proc.h pc.h commands.h socket.h
+lapb.obj: lapb.c global.h mbuf.h timer.h proc.h ax25.h lapb.h ip.h netrom.h
+lapbtime.obj: lapbtime.c global.h mbuf.h proc.h ax25.h timer.h lapb.h netrom.h
+lcsum.obj: lcsum.c global.h ip.h
+look.obj: look.c global.h session.h smtp.h usock.h socket.h mailbox.h
+lzhuf.obj: lzhuf.c global.h proc.h socket.h timer.h usock.h netuser.h session.h lzhuf.h xms.h
+lzw.obj: lzw.c global.h mbuf.h proc.h lzw.h socket.h usock.h session.h cmdparse.h commands.h
+mail2ind.obj: mail2ind.c global.h mailutil.h smtp.h files.h index.h unix.h dirutil.h
+mailbox.obj: mailbox.c global.h timer.h proc.h socket.h usock.h session.h smtp.h dirutil.h telnet.h ftp.h ftpserv.h commands.h netuser.h files.h bm.h pktdrvr.h ax25.h mailbox.h ax25mail.h nr4mail.h cmdparse.h mailfor.h mailutil.h index.h
+mailcli.obj: mailcli.c global.h timer.h proc.h socket.h domain.h cmdparse.h files.h netuser.h mailcli.h mailutil.h smtp.h
+mailfor.obj: mailfor.c unix.h global.h files.h dirutil.h bm.h cmdparse.h timer.h pktdrvr.h ax25.h mailfor.h socket.h commands.h index.h
+mailutil.obj: mailutil.c global.h socket.h mailutil.h mailbox.h smtp.h files.h bm.h index.h unix.h commands.h
+main.obj: main.c global.h mbuf.h timer.h proc.h iface.h ip.h tcp.h udp.h ax25.h kiss.h enet.h netrom.h bpq.h ftpcli.h telnet.h tty.h session.h hardware.h bm.h usock.h socket.h lzw.h cmdparse.h commands.h daemon.h devparam.h domain.h files.h main.h mailbox.h remote.h trace.h mailutil.h smtp.h index.h xms.h memlib.h sessmgr.h
+makelist.obj: makelist.c global.h
+mboxcmd.obj: mboxcmd.c global.h timer.h proc.h socket.h usock.h session.h smtp.h dirutil.h telnet.h ftp.h ftpserv.h commands.h netuser.h files.h bm.h pktdrvr.h ax25.h mailbox.h ax25mail.h nr4mail.h cmdparse.h mailfor.h
+mboxfile.obj: mboxfile.c global.h timer.h proc.h socket.h usock.h session.h smtp.h dirutil.h telnet.h ftp.h ftpserv.h commands.h netuser.h files.h bm.h pktdrvr.h ax25.h mailbox.h ax25mail.h nr4mail.h cmdparse.h mailfor.h
+mboxgate.obj: mboxgate.c global.h timer.h proc.h socket.h usock.h session.h smtp.h dirutil.h telnet.h ftp.h ftpserv.h commands.h netuser.h files.h bm.h pktdrvr.h ax25.h mailbox.h ax25mail.h nr4mail.h cmdparse.h mailfor.h
+mboxmail.obj: mboxmail.c global.h timer.h proc.h socket.h usock.h session.h smtp.h dirutil.h telnet.h ftp.h ftpserv.h commands.h netuser.h files.h bm.h pktdrvr.h ax25.h mailbox.h mailutil.h ax25mail.h nr4mail.h cmdparse.h mailfor.h
+mbuf.obj: mbuf.c global.h mbuf.h proc.h config.h
+md5.obj: md5.c global.h md5.h
+memintrl.obj: memintrl.c errors.h memlib.h emmlib.h
+memlib.obj: memlib.c memintrl.c
+memlog.obj: memlog.c global.h
+misc.obj: misc.c global.h socket.h mbuf.h
+netuser.obj: netuser.c global.h netuser.h domain.h
+nntpcli.obj: nntpcli.c global.h timer.h cmdparse.h commands.h socket.h usock.h netuser.h proc.h session.h smtp.h mailutil.h files.h bm.h index.h lzw.h
+nntpserv.obj: nntpserv.c global.h domain.h mbuf.h cmdparse.h socket.h iface.h proc.h smtp.h commands.h dirutil.h ftp.h netuser.h nntp.h session.h files.h smtp.h bm.h pc.h nr4.h netrom.h udp.h tcp.h ip.h usock.h lzw.h
+nr3.obj: nr3.c global.h mbuf.h pktdrvr.h iface.h netuser.h timer.h arp.h slip.h ax25.h netrom.h nr4.h lapb.h socket.h trace.h ip.h commands.h
+nr4.obj: nr4.c global.h mbuf.h timer.h proc.h ax25.h lapb.h netrom.h nr4.h cmdparse.h
+nr4hdr.obj: nr4hdr.c global.h mbuf.h proc.h nr4.h
+nr4mail.obj: nr4mail.c global.h proc.h netrom.h socket.h session.h cmdparse.h commands.h mailbox.h nr4mail.h lapb.h telnet.h
+nr4subr.obj: nr4subr.c global.h mbuf.h timer.h proc.h ax25.h netrom.h nr4.h lapb.h
+nr4timer.obj: nr4timer.c global.h mbuf.h timer.h proc.h ax25.h lapb.h netrom.h nr4.h
+nr4user.obj: nr4user.c global.h mbuf.h timer.h proc.h ax25.h lapb.h netrom.h nr4.h
+nrcmd.obj: nrcmd.c global.h mbuf.h proc.h ax25.h mailbox.h netrom.h nr4.h timer.h iface.h pktdrvr.h lapb.h cmdparse.h session.h socket.h commands.h files.h
+nrdump.obj: nrdump.c global.h mbuf.h netrom.h nr4.h trace.h socket.h
+nrhdr.obj: nrhdr.c global.h mbuf.h timer.h proc.h ax25.h netrom.h lapb.h
+nrs.obj: nrs.c global.h mbuf.h iface.h pktdrvr.h ax25.h nrs.h asy.h trace.h commands.h
+pathname.obj: pathname.c global.h dirutil.h config.h index.h
+pc.obj: pc.c global.h mbuf.h proc.h iface.h internet.h session.h tty.h usock.h socket.h smtp.h cmdparse.h dirutil.h files.h pc.h index.h mailbox.h memlib.h xms.h
+pc100.obj: pc100.c global.h mbuf.h iface.h pktdrvr.h netuser.h pc100.h z8530.h ax25.h trace.h pc.h
+pi.obj: pi.c global.h mbuf.h iface.h pktdrvr.h netuser.h pi.h z8530.h ax25.h trace.h pc.h session.h lapb.h proc.h ip.h devparam.h cmdparse.h
+pktdrvr.obj: pktdrvr.c global.h proc.h mbuf.h netuser.h enet.h arcnet.h ax25.h slip.h kiss.h iface.h ec.h arp.h trace.h pktdrvr.h config.h devparam.h
+pop2cli.obj: pop2cli.c global.h timer.h proc.h netuser.h socket.h cmdparse.h files.h mailcli.h mailutil.h smtp.h
+pop2serv.obj: pop2serv.c global.h mbuf.h cmdparse.h socket.h proc.h files.h smtp.h mailcli.h dirutil.h index.h bm.h
+pop3cli.obj: pop3cli.c global.h timer.h proc.h netuser.h socket.h cmdparse.h files.h mailcli.h mailutil.h smtp.h lzw.h md5.h
+pop3serv.obj: pop3serv.c global.h mbuf.h cmdparse.h socket.h proc.h files.h smtp.h dirutil.h mailutil.h bm.h index.h md5.h commands.h lzw.h
+ppp.obj: ppp.c global.h mbuf.h proc.h iface.h internet.h ip.h slhc.h unixasy.h i8250.h asy.h pktdrvr.h socket.h devparam.h ppp.h pppfsm.h ppplcp.h ppppap.h pppipcp.h trace.h
+pppcmd.obj: pppcmd.c global.h mbuf.h iface.h pktdrvr.h ppp.h pppfsm.h ppplcp.h ppppap.h pppipcp.h cmdparse.h
+pppdump.obj: pppdump.c global.h mbuf.h iface.h internet.h ppp.h trace.h socket.h
+pppfsm.obj: pppfsm.c global.h mbuf.h iface.h ppp.h pppfsm.h ppplcp.h trace.h
+pppipcp.obj: pppipcp.c global.h mbuf.h iface.h slhc.h ppp.h pppfsm.h pppipcp.h cmdparse.h files.h trace.h pktdrvr.h
+ppplcp.obj: ppplcp.c global.h mbuf.h iface.h socket.h ppp.h pppfsm.h ppplcp.h ppppap.h cmdparse.h devparam.h trace.h
+ppppap.obj: ppppap.c global.h mbuf.h proc.h iface.h session.h socket.h ppp.h pppfsm.h ppplcp.h ppppap.h cmdparse.h files.h trace.h main.h
+pushmail.obj: pushmail.c unix.h dirutil.h
+qrz.obj: qrz.c global.h mbuf.h socket.h session.h proc.h netuser.h commands.h tty.h config.h xms.h unix.h
+rarp.obj: rarp.c global.h mbuf.h proc.h timer.h iface.h socket.h ax25.h arp.h netuser.h cmdparse.h pktdrvr.h
+rawcons.obj: rawcons.c hardware.h proc.h socket.h tty.h sessmgr.h config.h
+rdate.obj: rdate.c global.h mbuf.h socket.h session.h proc.h netuser.h commands.h tty.h timer.h cmdparse.h
+rip.obj: rip.c global.h mbuf.h netuser.h udp.h timer.h iface.h ip.h internet.h rip.h arp.h socket.h
+ripcmd.obj: ripcmd.c global.h mbuf.h netuser.h internet.h cmdparse.h timer.h iface.h udp.h rip.h commands.h
+ripdump.obj: ripdump.c global.h mbuf.h netuser.h timer.h rip.h trace.h socket.h
+rlogin.obj: rlogin.c global.h mbuf.h socket.h session.h proc.h tty.h commands.h netuser.h
+rspf.obj: rspf.c global.h mbuf.h proc.h timer.h netuser.h internet.h pktdrvr.h ip.h iface.h ax25.h arp.h icmp.h socket.h rspf.h
+rspfcmd.obj: rspfcmd.c global.h mbuf.h timer.h iface.h cmdparse.h netuser.h socket.h rspf.h ip.h
+rspfdump.obj: rspfdump.c global.h mbuf.h netuser.h internet.h socket.h ip.h rspf.h
+rspfhdr.obj: rspfhdr.c global.h mbuf.h internet.h ip.h timer.h rspf.h
+rwhodump.obj: rwhodump.c global.h mbuf.h trace.h socket.h
+sam.obj: sam.c global.h mbuf.h socket.h session.h proc.h netuser.h commands.h tty.h config.h samapi.h
+samlib.obj: samlib.c global.h samapi.h
+scanjmsg.obj: scanjmsg.c getopt.h
+scc.obj: scc.c global.h config.h mbuf.h netuser.h proc.h iface.h pktdrvr.h slip.h nrs.h i8250.h scc.h z8530.h z8536.h ax25.h trace.h pc.h kiss.h devparam.h
+sendfax.obj: sendfax.c global.h smtp.h
+session.obj: session.c global.h config.h mbuf.h proc.h ip.h ftpcli.h icmp.h telnet.h tty.h session.h hardware.h socket.h cmdparse.h rlogin.h commands.h main.h sessmgr.h usock.h
+sessmgr.obj: sessmgr.c global.h hardware.h proc.h socket.h tty.h sessmgr.h cmdparse.h commands.h usock.h
+slhc.obj: slhc.c global.h mbuf.h internet.h ip.h tcp.h slhc.h
+slhcdump.obj: slhcdump.c global.h mbuf.h internet.h ip.h slhc.h trace.h socket.h
+slip.obj: slip.c global.h mbuf.h iface.h ip.h slhc.h asy.h slip.h trace.h
+smisc.obj: smisc.c global.h netuser.h mbuf.h socket.h proc.h remote.h smtp.h iface.h tcp.h nr4.h commands.h hardware.h mailbox.h cmdparse.h usock.h
+smtpcli.obj: smtpcli.c global.h mbuf.h cmdparse.h proc.h socket.h lzw.h timer.h netuser.h smtp.h dirutil.h commands.h session.h files.h domain.h ip.h
+smtpserv.obj: smtpserv.c global.h mbuf.h cmdparse.h socket.h lzw.h iface.h proc.h smtp.h commands.h dirutil.h mailbox.h mailutil.h bm.h domain.h session.h files.h index.h nntp.h
+sockcmd.obj: sockcmd.c global.h iface.h mbuf.h proc.h lzw.h usock.h socket.h ax25.h netrom.h tcp.h udp.h commands.h config.h
+socket.obj: socket.c global.h mbuf.h netuser.h timer.h iface.h ip.h tcp.h udp.h ax25.h lapb.h netrom.h nr4.h proc.h lzw.h usock.h socket.h unix.h
+sockuser.obj: sockuser.c global.h mbuf.h proc.h socket.h lzw.h usock.h session.h nr4.h sessmgr.h
+sockutil.obj: sockutil.c global.h iface.h mbuf.h netuser.h socket.h usock.h lapb.h tcp.h nr4.h config.h
+stktrace.obj: stktrace.c global.h proc.h
+sw.obj: sw.c global.h cmdparse.h pc.h
+tcpcmd.obj: tcpcmd.c global.h timer.h mbuf.h netuser.h internet.h iface.h tcp.h cmdparse.h commands.h socket.h
+tcpdump.obj: tcpdump.c global.h mbuf.h netuser.h internet.h iface.h tcp.h ip.h trace.h socket.h
+tcpgate.obj: tcpgate.c global.h mbuf.h socket.h commands.h netuser.h cmdparse.h
+tcphdr.obj: tcphdr.c global.h mbuf.h iface.h tcp.h ip.h internet.h
+tcpin.obj: tcpin.c global.h timer.h mbuf.h netuser.h internet.h iface.h tcp.h icmp.h iface.h ip.h
+tcpout.obj: tcpout.c global.h timer.h mbuf.h netuser.h internet.h iface.h tcp.h ip.h
+tcpsubr.obj: tcpsubr.c global.h timer.h mbuf.h netuser.h internet.h iface.h tcp.h ip.h
+tcptimer.obj: tcptimer.c global.h mbuf.h timer.h netuser.h internet.h iface.h tcp.h
+tcpuser.obj: tcpuser.c global.h timer.h mbuf.h netuser.h socket.h internet.h iface.h tcp.h ip.h icmp.h proc.h
+telnet.obj: telnet.c global.h mbuf.h socket.h telnet.h session.h proc.h tty.h commands.h netuser.h lzw.h md5.h files.h
+term.obj: term.c global.h netuser.h mbuf.h socket.h proc.h remote.h smtp.h iface.h asy.h tcp.h nr4.h commands.h hardware.h mailbox.h i8250.h unix.h unixasy.h devparam.h cmdparse.h telnet.h
+test.obj: test.c xms.h
+timed.obj: timed.c global.h mbuf.h socket.h session.h proc.h commands.h
+timer.obj: timer.c global.h timer.h proc.h session.h mbuf.h commands.h daemon.h hardware.h socket.h
+tip.obj: tip.c global.h mbuf.h proc.h iface.h unixasy.h i8250.h asy.h tty.h session.h socket.h commands.h devparam.h
+tipmail.obj: tipmail.c global.h mbuf.h timer.h proc.h iface.h unixasy.h i8250.h asy.h socket.h usock.h telnet.h mailbox.h tipmail.h devparam.h lapb.h
+trace.obj: trace.c global.h iface.h socket.h mbuf.h pktdrvr.h commands.h session.h trace.h cmdparse.h slip.h devparam.h
+ttydriv.obj: ttydriv.c global.h mbuf.h session.h tty.h socket.h
+ttylink.obj: ttylink.c global.h mbuf.h socket.h telnet.h session.h proc.h tty.h mailbox.h commands.h
+twin_at.obj: twin_at.c global.h hardware.h mbuf.h iface.h ax25.h trace.h netuser.h proc.h pktdrvr.h devparam.h z8530.h gracilis.h twin.h
+twin_dr.obj: twin_dr.c global.h hardware.h mbuf.h iface.h ax25.h trace.h proc.h pktdrvr.h z8530.h gracilis.h twin.h
+udp.obj: udp.c global.h mbuf.h netuser.h iface.h udp.h ip.h internet.h icmp.h
+udpcmd.obj: udpcmd.c global.h mbuf.h netuser.h socket.h udp.h internet.h cmdparse.h commands.h
+udpdump.obj: udpdump.c global.h mbuf.h netuser.h internet.h udp.h ip.h socket.h trace.h socket.h
+udphdr.obj: udphdr.c global.h mbuf.h ip.h internet.h udp.h
+unix.obj: unix.c hardware.h timer.h proc.h unixtm.h socket.h files.h session.h
+unixasy.obj: unixasy.c global.h mbuf.h proc.h iface.h asy.h timer.h unixasy.h hardware.h devparam.h commands.h cmdparse.h kisspoll.h
+version.obj: version.c global.h mbuf.h socket.h commands.h ax25.h
+wildmat.obj: wildmat.c global.h
+xmodem.obj: xmodem.c global.h dirutil.h timer.h socket.h mailbox.h
+xmsutil.obj: xmsutil.c global.h xms.h
+

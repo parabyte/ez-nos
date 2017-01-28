@@ -1,0 +1,867 @@
+--- domain.c	1994/01/04 14:09:14	1.5
++++ domain.c	1997/06/28 12:31:52
+@@ -11,7 +11,7 @@
+  */
+ 
+ /****************************************************************************
+-*       $Id: domain.c 1.5 1994/01/04 14:09:14 ROOT_DOS Rel $
++*       $Id: domain.c 1.6 1997/06/28 12:31:52 Graham Exp $
+ *       07 Jun 92       1.2             GT      Reset DNS timeout on DNS failure.                               *
+ *       Oct 92 - mt@kram.demon.co.uk (G7LEU) merged NOS WG7J104 DNS code.               *
+ *       Feb 93 - lonewolf@sphere.demon.co.uk fixed DNS reply to TYPE_ANY query.
+@@ -20,6 +20,17 @@
+ *                changed all remaining printf to tprintf.
+ *	17 May 93	1.4		GT	Fix warnings.									*
+ *	24 Dec 93	1.5		GT	Fix conditionals.								*
++*	   Jun 97	1.6		GeK	Fix warnings under BC4, fix cachelist and		*
++*	         	   		   	dodnsquery, resolve_mx() fixed and streamlined,	*
++*	         	   		   	DSERVER conditionals fixed, other minor fixes,	*
++*	         	   		   	Added fns for multiple MX & A record handling,	*
++*	         	   		   	Ndtypes constant, added are_we_an_mx() function	*
++*	         	   		   	use session flow control rather than custom,	*
++*	         	   		   	dns_query() returns failure flag (v951123) and	*
++*	         	   		   	doesn't store -ve responses to TYPE_ANY (JNOS),	*
++*	         	   		   	removed surplus pwait() in dfile_search(),		*
++*	         	   		   	resolve_rr() doesn't return CNAME or PTR		*
++*	         	   		   	records (JNOS), added ANY to dtype()			*
+ ****************************************************************************/
+ 
+ #include <stdio.h>
+@@ -43,10 +54,14 @@
+ #include "files.h"
+ #include "main.h"
+ #include "domain.h"
++#include "iface.h"		/*  GeK - ismyaddr() in are_we_an_mx()  */
+ 
+ #undef  DEBUG                           /* for certain trace messages */
+ #undef  DEBUG_PAIN                      /* for painful debugging */
+ 
++#define	CACHE_DOMAIN_QUERY				/*  GeK - cache results from domain query  */
++#define	USE_SESSION_FLOW				/*  GeK - use session flow control rather than our own  */
++
+ static struct rr *Dcache = NULLRR;      /* Cache of resource records */
+ static int Dcache_size = 20;            /* size limit */
+ static time_t Dcache_time = 0L;         /* timestamp */
+@@ -86,7 +101,10 @@
+ 	"MX",
+ 	"TXT"
+ };
++#ifdef	notdef	/*  GeK - Ndtypes constant  */
+ static int Ndtypes = 17;
++#endif
++#define	Ndtypes	17
+ static char delim[] = " \t\r\n";
+ 
+ #ifdef DSERVER
+@@ -98,13 +116,15 @@
+ 	int32 source;
+ 	struct soa dom_soa;
+ 	} *dom_file = NULL;
+-struct proc *Drx;
+-int Dsocket;
++static struct proc *Drx;
++static int Dsocket;
+ extern char *Dzones;
+ extern char *Dboot;
+ #endif
+ 
++#ifdef	notdef		/*  GeK - now a function  */
+ extern int are_we_an_mx;
++#endif
+ 
+ static int docache __ARGS((int argc,char *argv[],void *p));
+ static int dosuffix __ARGS((int argc,char *argv[],void *p));
+@@ -145,19 +165,19 @@
+ 
+ static void dumpdomain __ARGS((struct dhdr *dhp,int32 rtt));
+ static int dns_makequery __ARGS((int16 op,struct rr *rrp, char *buffer,int16 buflen));
+-static void dns_query __ARGS((struct rr *rrlp));
++static int dns_query __ARGS((struct rr *rrlp));
+ 
+ static int isaddr __ARGS((char *s));
+ static char *checksuffix __ARGS((char *dname));
+ static struct rr *resolver __ARGS((struct rr *rrlp));
+ 
+-#if	DSERVER
++#ifdef	DSERVER		/*  GeK - ifdef  */
+ static void free_dhdr __ARGS((struct dhdr *));
+ static void proc_query __ARGS((int,void *,void *));
+ static void drx __ARGS((int,void *,void *));
+ static int dodnsserver __ARGS((int argc,char *argv[],void *p));
+ static int dostopdnsserver __ARGS((int argc,char *argv[],void *p));
+-#endif
++#endif	/* DSERVER */
+ 
+ 
+ /**
+@@ -224,7 +244,7 @@
+ 	return 0;
+ }
+ 
+-static
++static int		/*  GeK - match prototype and fix warning  */
+ dodnsmaxw(argc,argv,p)
+ int argc;
+ char *argv[];
+@@ -250,28 +270,40 @@
+ {
+ 	struct rr *rrp;
+ 	struct session *sp;
++#ifndef	USE_SESSION_FLOW	/*  GeK  */
+ 	int row = MOREROWS;
++#endif
+ 
+-	if((sp = newsession(argv[1],DCLIST)) == NULLSESSION){
++	/*  GeK - from Niel Kempson - argv[1] is NULL  */
++	if((sp = newsession(argv[0],DCLIST)) == NULLSESSION){
+ 		return -1;
+ 	}
++#ifdef	USE_SESSION_FLOW	/*  GeK  */
++	sp->flowmode = 1;
++#endif
+ 
+ 	(void)dcache_search(NULLRR); /* update ttl */
+ 
++#ifndef	USE_SESSION_FLOW	/*  GeK  */
+ 	/* Put tty into raw mode so single-char responses will work */
+ 	sp->ttystate.echo = sp->ttystate.edit = 0;
++#endif
+ 
+ 	for(rrp=Dcache;rrp!=NULLRR;rrp=rrp->next)
+ 	{
+ 		put_rr(stdout,rrp);
++#ifndef	USE_SESSION_FLOW	/*  GeK  */
+ 		if(--row == 0){
+ 			row = keywait("--More--",0);
+ 			switch(row){
+ 			case -1:
+ 			case 'q':
+ 			case 'Q':
++#ifdef	notdef	/*  GeK - prevent following the NULL ptr - jump out  */
+ 				rrp = NULLRR;
+ 				break;
++#endif	/* notdef */
++				goto cachelistquit;
+ 			case '\n':
+ 			case '\r':
+ 				row = 1;
+@@ -281,8 +313,12 @@
+ 				row = MOREROWS;
+ 			};
+ 		}
++#endif	/* !USE_SESSION_FLOW */
+ 	}
++cachelistquit:	/*  GeK - target for --more-- prompt quit  */
++#ifdef	notdef	/*  GeK - keywait() does tflush()  */
+ 	fflush(stdout);
++#endif
+ 	keywait(NULLCHAR,1);
+ 	freesession(sp);
+ 	return 0;
+@@ -448,13 +484,18 @@
+ {
+ 	struct rr *rrp;
+ 	struct rr *result_rrlp;
+-	char *sname;
++	char *sname = NULL;
+ 	struct session *sp;
++#ifndef	USE_SESSION_FLOW	/*  GeK  */
+ 	int row = MOREROWS;
++#endif
+ 
+ 	if((sp = newsession(argv[1],DQUERY)) == NULLSESSION){
+ 		return -1;
+ 	}
++#ifdef	USE_SESSION_FLOW	/*  GeK  */
++	sp->flowmode = 1;
++#endif
+ 
+ 	if ( isaddr( argv[1] ) ) {
+ 		result_rrlp = inverse_a( aton( argv[1] ) );
+@@ -468,20 +509,26 @@
+ 		free_rr(rrp);
+ 	}
+ 
++#ifndef	USE_SESSION_FLOW	/*  GeK  */
+ 	/* Put tty into raw mode so single-char responses will work */
+ 	sp->ttystate.echo = sp->ttystate.edit = 0;
++#endif
+ 
+ 	for( rrp=result_rrlp; rrp!=NULLRR; rrp=rrp->next)
+ 	{
+ 		put_rr(stdout,rrp);
++#ifndef	USE_SESSION_FLOW	/*  GeK  */
+ 		if(--row == 0){
+ 			row = keywait("--More--",0);
+ 			switch(row){
+ 			case -1:
+ 			case 'q':
+ 			case 'Q':
++#ifdef	notdef	/*  GeK - prevent following NULL ptr on loop quit  */
+ 				rrp = NULLRR;
+ 				break;
++#endif	/* notdef */
++				goto dnslistquit;
+ 			case '\n':
+ 			case '\r':
+ 				row = 1;
+@@ -491,8 +538,20 @@
+ 				row = MOREROWS;
+ 			};
+ 		}
++#endif	/* !USE_SESSION_FLOW */
+ 	}
++dnslistquit:	/*  GeK - loop quit target  */
++#ifdef	notdef	/*  GeK - keywait() does tflush()  */
+ 	fflush(stdout);
++#endif
++#ifdef	CACHE_DOMAIN_QUERY
++	/*  GeK - cache query results
++	 *  crude check requires sname remain non-NULL from above !isaddr()
++	 */
++	if (sname)
++		dcache_add(result_rrlp);
++	else
++#endif	/* CACHE_DOMAIN_QUERY */
+ 	free_rr(result_rrlp);
+ 	keywait(NULLCHAR,1);
+ 	freesession(sp);
+@@ -531,6 +590,10 @@
+ 	if (value < Ndtypes)
+ 		return Dtypes[value];
+ 
++	/*  GeK - show type ANY correctly  */
++	if (value == TYPE_ANY)
++		return ("ANY");
++
+ 	sprintf( buf, "{%d}", value);
+ 	return buf;
+ }
+@@ -946,13 +1009,13 @@
+ FILE *fp;
+ struct rr *lastrrp;
+ {
+-	char *line,*lp,*strtok();
++	char *line,*lp;		/*  GeK - removed unnec. strtok() prototype  */
+ 	struct rr *rrp;
+-	char *name,*ttl,*class,*type,*data;
++	char *name,*ttl,*class,*type,*data = NULL;		/*  GeK - fix warning  */
+ 	int i;
+ 
+-	line = mallocw(500);
+-	if(fgets(line,500,fp) == NULL){
++	line = mallocw(256);
++	if(fgets(line,256,fp) == NULL){
+ 		free(line);
+ 		return NULLRR;
+ 		}
+@@ -965,15 +1028,17 @@
+ 		while (*p && *p != '(')
+ 			p++;
+ 		*p = '\0';
+-		big_line = mallocw(500);
++		big_line = mallocw(256);
++#ifdef	notdef		/* GeK - mallocw won't fail  */
+ 		if (big_line == NULL)
+ 			{
+ 			free(line);
+ 			return NULLRR;
+ 			}
++#endif	/* notdef */
+ 		strcpy(big_line, line);
+ 		done = FALSE;
+-		while (fgets(line, 500, fp) && !done)
++		while (fgets(line, 256, fp) && !done)
+ 			{
+ 			if (strchr(line, ')'))
+ 				done = TRUE;
+@@ -1118,16 +1183,17 @@
+ 			rrp->rdata.soa.rname = strdup(data);
+ 			rrp->rdlength += strlen(data);
+ 		}
+-		data = strtok(NULLCHAR,delim);
+-		rrp->rdata.soa.serial = atol(data);
+-		data = strtok(NULLCHAR,delim);
+-		rrp->rdata.soa.refresh = atol(data);
+-		data = strtok(NULLCHAR,delim);
+-		rrp->rdata.soa.retry = atol(data);
+-		data = strtok(NULLCHAR,delim);
+-		rrp->rdata.soa.expire = atol(data);
+-		data = strtok(NULLCHAR,delim);
+-		rrp->rdata.soa.minimum = atol(data);
++		/*  GeK - additional checking for corrupt SOA  */
++		if ((data = strtok(NULLCHAR,delim)) != NULLCHAR)
++			rrp->rdata.soa.serial = atol(data);
++		if ((data = strtok(NULLCHAR,delim)) != NULLCHAR)
++			rrp->rdata.soa.refresh = atol(data);
++		if ((data = strtok(NULLCHAR,delim)) != NULLCHAR)
++			rrp->rdata.soa.retry = atol(data);
++		if ((data = strtok(NULLCHAR,delim)) != NULLCHAR)
++			rrp->rdata.soa.expire = atol(data);
++		if ((data = strtok(NULLCHAR,delim)) != NULLCHAR)
++			rrp->rdata.soa.minimum = atol(data);
+ 		rrp->rdlength += 20;
+ 		break;
+ 	}
+@@ -1182,7 +1248,7 @@
+ 
+ 	stuff = dtype(rrp->type);
+ 	sofprintf(fp,"\t%s",stuff);
+-	if(rrp->rdlength == 0){
++	if(rrp->rdlength <= 0){	/*  GeK <=  */
+ 		/* Null data portion, indicates nonexistent record */
+ 		/* or unsupported type.  Hopefully, these will filter */
+ 		/* as time goes by. */
+@@ -1234,7 +1300,9 @@
+ struct rr *rrlp;
+ char *filename;
+ {
++#ifdef	notdef		/*  GeK - removed use below  */
+ 	int counter;
++#endif
+ 	register struct rr *frrp;
+ 	struct rr **rrpp, *result_rrlp, *oldrrp;
+ 	int32 elapsed;
+@@ -1281,13 +1349,17 @@
+ 	result_rrlp = NULLRR;           /* for contiguous test below */
+ 	oldrrp = NULLRR;
+ 	rrpp = &result_rrlp;
++#ifdef	notdef		/*  GeK - no longer used below  */
+ 	counter = 0;
++#endif	/* notdef */
+ 	while((frrp = get_rr(dbase,oldrrp)) != NULLRR){
++#ifdef	notdef		/*  GeK - pwait() already in loop below  */
+ 		if (++counter == 100)
+ 			{
+ 			pwait(NULL);
+ 			counter = 0;
+ 			}
++#endif	/* notdef */
+ 		free_rr(oldrrp);
+ 		if(frrp->type != TYPE_MISSING
+ 		&& frrp->rdlength > 0
+@@ -1487,8 +1559,8 @@
+ 	struct rr *rrp;
+ 	char * stuff;
+ 
+-	tprintf("response id %u (rtt %lu sec) qr %u opcode %u aa %u tc %u rd %u ra %u rcode %u\n",
+-	 dhp->id,(long)rtt / 1000L,
++	tprintf("response id %u (rtt %lu ms) qr %u opcode %u aa %u tc %u rd %u ra %u rcode %u\n",
++	 dhp->id,rtt,
+ 	 dhp->qr,dhp->opcode,dhp->aa,dhp->tc,dhp->rd,
+ 	 dhp->ra,dhp->rcode);
+ 	tprintf("%u questions:\n",dhp->qdcount);
+@@ -1509,6 +1581,7 @@
+ 	for(rrp = dhp->additional; rrp != NULLRR; rrp = rrp->next){
+ 		put_rr(stdout,rrp);
+ 	}
++	tputc('\n');		/*  GeK - extra CR separates trace and result on screen  */
+ 	fflush(stdout);
+ }
+ 
+@@ -1542,7 +1615,7 @@
+ 		/* Look for next dot */
+ 		cp1 = strchr(dname,'.');
+ 		if(cp1 != NULLCHAR)
+-			len = cp1-dname;        /* More to come */
++			len = (int16) (cp1-dname);        /* More to come */	/*  GeK - cast to fix warning  */
+ 		else
+ 			len = dlen;     /* Last component */
+ 		*cp++ = len;            /* Write length of component */
+@@ -1569,8 +1642,9 @@
+  *      (future features)
+  *      multiple queries.
+  *      inverse queries.
++ * return value: 0 if something added to cache, -1 if error
+  */
+-static void
++static int
+ dns_query(rrlp)
+ struct rr *rrlp;
+ {
+@@ -1580,9 +1654,8 @@
+ 	int32 rtt,abserr;
+ 	int tried = 0;          /* server list has been retried (count) */
+ 
+-	if((dp = Dservers) == NULLDOM){
+-		return;
+-	}
++	if((dp = Dservers) == NULLDOM)
++		return -1;
+ 
+ 	for(;;){
+ 		char *buf;
+@@ -1620,9 +1693,8 @@
+ 		if(rval > 0)
+ 			break;
+ 
+-		if(errno == EABORT){
+-			return;         /* Killed by "reset" command */
+-		}
++		if(errno == EABORT)
++			return -1;         /* Killed by "reset" command */
+ 
+ 		/* Timeout; back off this one and try another server */
+ 		dp->timeouts++;
+@@ -1646,7 +1718,7 @@
+ 						}
+ 					}       
+ 				dp = Dservers;
+-				return;
++				return -1;
+ 				}
+ 		}
+ 	}
+@@ -1654,6 +1726,7 @@
+ 	/* got a response */
+ 	dp->responses++;
+ 	dhp = (struct dhdr *) mallocw(sizeof(struct dhdr));
++	/*  GeK - should check the return value of ntohdomain() here ...  */
+ 	ntohdomain(dhp,&bp);    /* Convert to local format */
+ 
+ 	/* Compute and update the round trip time */
+@@ -1686,9 +1759,13 @@
+ 		}
+ 
+ 		/* make the questions the negative answers */
+-		for(rrp = dhp->questions; rrp != NULLRR; rrp = rrp->next)
++		for(rrp = dhp->questions; rrp != NULLRR; rrp = rrp->next) {
+ 			rrp->ttl = ttl;
++			if (rrp->type == TYPE_ANY)
++				goto not_an_answer;		/*  GeK - Except ignore TYPE_ANY (JNOS)  */
++		}
+ 	} else {
++not_an_answer:
+ 		free_rr(dhp->questions);
+ 		dhp->questions = NULLRR;
+ 	}
+@@ -1710,7 +1787,7 @@
+ 		keywait(NULLCHAR,1);    /* so we can look around */
+ #endif
+ 	free((char *)dhp);
+-	return;
++	return 0;
+ }
+ 
+ 
+@@ -1763,7 +1840,7 @@
+ 	return sname;
+ }
+ 
+-#if	DSERVER
++#ifdef	DSERVER		/*  GeK - ifdef  */
+ char *
+ zone_filename(domain, expire)
+ char *domain;
+@@ -1798,7 +1875,7 @@
+ 	free(name);
+ 	return NULL;
+ }
+-#endif
++#endif	/* DSERVER */
+ 
+ /* Search for resource records.
+  * Returns RR list, or NULLRR if no record found.
+@@ -1846,7 +1923,9 @@
+ 	}
+ 	if(result_rrlp == NULLRR || check_ttl(result_rrlp) != 0){
+ 		dcache_add(result_rrlp);        /* save any expired RRs */
+-		dns_query(rrlp);
++		/*  GeK - dns_query() returns result (PK's export v951123)  */
++		if (dns_query(rrlp) == -1)
++			return NULL;
+ 		result_rrlp = dcache_search(rrlp);
+ 	}
+ 	dcache_add(copy_rr_list(result_rrlp));
+@@ -1892,7 +1971,7 @@
+ char *dname;
+ int16 dtype;
+ {
+-	struct rr *qrrp;
++	struct rr *qrrp, *prrp;		/*  GeK - added prrp for JNOS fix below  */
+ 	struct rr *result_rrlp;
+ 	char *sname;
+ 	int looping = MAXCNAME;
+@@ -1925,6 +2004,35 @@
+ 		looping--;
+ 	}
+ 	free_rr(qrrp);
++	/*  GeK - added from JNOS, saves additional checks in resolve_mx()
++	 *  CNAMEs and PTRs could lurk in the cache and be returned otherwise
++	 */
++	/* n5knx: Now be sure no CNAME or PTR records are returned.  This could happen
++	 * if no recursion was permitted, or recursion nesting > MAXCNAME was encountered.
++	 */
++	qrrp = result_rrlp;
++	prrp = NULLRR;
++	while (qrrp) {
++		if (qrrp->type != dtype && dtype != TYPE_ANY) {  /* Must be either CNAME or PTR */
++			if (prrp)
++				prrp->next = qrrp->next;
++			else
++				result_rrlp = qrrp->next;
++			free (qrrp->comment);
++			free (qrrp->suffix);
++			free (qrrp->name);
++			free (qrrp->rdata.name);
++			free (qrrp);
++			if (prrp)
++				qrrp = prrp->next;
++			else
++				qrrp = result_rrlp;
++		}
++		else {
++			prrp = qrrp;
++			qrrp = qrrp->next;
++		}
++	}
+ 	return result_rrlp;
+ }
+ 
+@@ -2005,7 +2113,7 @@
+ #endif
+ 			 && rp->metric < cost) {
+ 				ip_address = rrp->rdata.addr;
+-				cost = rp->metric;
++				cost = (int16) rp->metric;		/*  GeK - cast to fix warning, metric is int32  */
+ 			}
+ 			rrp = rrp->next;
+ 		}
+@@ -2024,16 +2132,20 @@
+ char *name;
+ {
+ 	register struct rr *rrp, *arrp;
+-	char *sname, *tmp, *cp;
++	char *sname;	/*  *tmp, *cp;  */		/*  GeK - tmp & cp no longer used  */
+ 	int32 addr, ip_address = 0;
+ 	int16 pref = MAXINT16;
++#ifdef	notdef		/*  GeK - only used with DSERVER - see below  */
+ 	int our_domain = 0;
++#endif
+ 
++#ifdef	notdef		/*  GeK - this now makes no difference here  */
+ 	are_we_an_mx = 0;
+ #if	DSERVER
+ 	if (zone_filename(name, NULL))
+ 		our_domain = 1;
+-#endif
++#endif	/* DSERVER */
++#endif	/* notdef */
+ 
+ 	if(name == NULLCHAR)
+ 		return 0;
+@@ -2045,24 +2157,24 @@
+ 	else
+ 		sname = strdup(name);
+ 
++#ifdef	notdef		/*  GeK - not used - don't need loop on MX queries  */
+ 	cp = sname;
+ 	while(1){
++#endif
+ 		rrp = arrp = resolve_rr(sname,TYPE_MX);
+ 		/* Search this list of rr's for an MX record */
+ 		while(rrp != NULLRR){
+-			if(rrp->rdlength > 0 && (addr = resolve(rrp->rdata.mx.exch)) != 0L)
+-				{
+-				if (addr == Ip_addr)
+-					are_we_an_mx = 1;
+-				if (rrp->rdata.mx.pref <= pref)
+-					{
+-					pref = rrp->rdata.mx.pref;
+-					ip_address = addr;
+-					}
+-				}
++			/*  GeK - previously checked type here but JNOS fix in resolve_rr() eliminates it  */
++			if (rrp->rdlength > 0
++			    && rrp->rdata.mx.pref < pref
++				&& (addr = resolve(rrp->rdata.mx.exch)) != 0) {
++				pref = rrp->rdata.mx.pref;
++				ip_address = addr;
++			}
+ 			rrp = rrp->next;
+ 		}
+ 		free_rr(arrp);
++#ifdef	notdef		/*  GeK - removed this, non RFC compliant - includes end of while(1) loop  */
+ 		if(ip_address != 0)
+ 			break;
+ 		/* If this is our domain we can say no at this point */
+@@ -2077,12 +2189,50 @@
+ 		sname = tmp;
+ 		cp = sname + 2;
+ 	}
++#endif	/* notdef */
+ 	free(sname);
+ 	if (Dtrace)
+ 		tprintf("resolve_mx %s returns %s\n", name, inet_ntoa(ip_address));
+ 	return ip_address;
+ }
+ 
++/*
++ *  GeK - for the SMTP client, returns TRUE if our Hostname appears in the MX list
++ *  for the given domain.  Allows resolve_mx() to be much faster above
++ *  This is really a fudge until MX handling is fully implemented
++ */
++int
++are_we_an_mx (char *name)
++{
++	struct rr *rrp, *arrp;
++	int	matched = FALSE;
++	int	hostname_len = strlen (Hostname);
++	int32 addr;
++
++	if (isaddr (name))
++		return (matched);	/*  Would have matched our IP addr somewhere else  */
++
++	rrp = arrp = resolve_rr (name, TYPE_MX);
++	while (rrp != NULLRR) {
++		/*  Check for an MX host matching our hostname (note trailing dot)
++		 *  or an address matching one of our interfaces
++		 */
++		if (rrp->rdlength > 0
++		    && ((strnicmp (rrp->rdata.mx.exch, Hostname, hostname_len) == 0
++		         && rrp->rdata.mx.exch[hostname_len] == '.'
++		         && rrp->rdata.mx.exch[hostname_len+1] == '\0')
++		        || ((addr = resolve (rrp->rdata.mx.exch)) != 0
++		            && ismyaddr (addr) != NULL))) {
++			matched = TRUE;
++			break;
++		}
++		rrp = rrp->next;
++	}
++	free_rr(arrp);
++	return (matched);
++}
++
++#ifdef	notdef	/*  GeK - this function is obselete, no longer called from smtpserv.c  */
+ /* Search for local records of the MB, MG and MR type. Returns list of
+  * matching records.
+  */
+@@ -2123,6 +2273,7 @@
+ 	dcache_add(copy_rr_list(result_rrlp));
+ 	return result_rrlp;
+ }
++#endif	/* notdef */
+ 
+ #ifdef DSERVER
+ 
+@@ -2518,4 +2669,218 @@
+     free((char *)dp);
+ }
+ 
+-#endif
++#endif	/* DSERVER */
++
++/*
++ *	GeK - new functions to handle multiple MX and A records
++ */
++
++#ifdef	notdef
++/*
++ *  Creates a singly linked list of ordered MX records for
++ *  a given mail domain
++ *  No check is made for own MX domain(s) appearing in list
++ *  Returns NULL_MX_LIST on error
++ */
++struct dns_mx_list *
++resolve_mx_list (char *mail_domain)
++{
++	register struct rr *rrp, *arrp;
++	struct dns_mx_list *mx_list = NULL_MX_LIST;
++	struct dns_mx_list *mx_lptr;
++	char               *lookup_name;
++
++	if (mail_domain == NULLCHAR)
++		return (NULL_MX_LIST);
++
++	if (isaddr (mail_domain))
++	{		
++		lookup_name = resolve_a (aton (mail_domain), FALSE);
++		if (lookup_name == NULLCHAR)
++			return (NULL_MX_LIST);
++	}
++	else
++	{
++		lookup_name = strdup (mail_domain);
++	}
++
++	rrp = arrp = resolve_rr (lookup_name, TYPE_MX);
++
++	/* Search this list of rr's for an MX record */
++	while (rrp != NULLRR)
++	{
++		if (rrp->type == TYPE_MX && rrp->rdlength > 0)
++		{
++			struct dns_mx_list	*new_mx_entry;
++			struct dns_mx_list	*last_mx_lptr;
++
++			/*  search ordered list looking for insert point  */
++			last_mx_lptr = NULL_MX_LIST;
++			mx_lptr = mx_list;
++
++			while (mx_lptr != NULL_MX_LIST)
++			{
++				if (rrp->rdata.mx.pref < mx_lptr->pref)
++					/*  Insert here  */
++					break;
++
++				/*  move down list  */
++				last_mx_lptr = mx_lptr;
++				mx_lptr = mx_lptr->next;
++			}
++
++			/*  Create new mx_list entry  */
++			new_mx_entry = mallocw (sizeof (struct dns_mx_list));
++			new_mx_entry->pref = rrp->rdata.mx.pref;
++			new_mx_entry->exch = rrp->rdata.mx.exch;
++
++			/*  Add new entry at chosen point  */
++			if (last_mx_lptr == NULL_MX_LIST)
++				mx_list = new_mx_entry;
++			else
++				last_mx_lptr->next = new_mx_entry;
++
++			/*  link rest of list  */
++			new_mx_entry->next = mx_lptr;
++		}  /*  if valid MX entry  */
++		rrp = rrp->next;
++	}  /*  while rrp list  */
++
++	free_rr (arrp);
++	free (lookup_name);
++
++	if (Dtrace)
++	{
++		tprintf ("resolve_mx_list %s returns:", mail_domain);
++		mx_lptr = mx_list;
++		if (mx_lptr == NULL_MX_LIST)
++		{
++			tprintf ("  (NULL list)\n");
++		}
++		else while (mx_lptr != NULL_MX_LIST)
++		{
++			tprintf ("  %3u %s\n", mx_lptr->pref, mx_lptr->name);
++			mx_lptr = mx_lptr->next;
++		}
++	}
++
++	return (mx_list);
++}
++
++/*
++ *  Creates a singly linked list of A records for a given
++ *  domain name (to handle multi-homed or clustered hosts)
++ *  Returns NULL_ADDR_LIST on error
++ */
++struct dns_addr_list *
++resolve_list (char *domain_name)
++{
++	register struct rr     *rrp, *arrp;
++	struct dns_addr_list   *addr_list = NULL_ADDR_LIST;
++	struct dns_addr_list   *addr_ptr;
++
++	if (domain_name == NULLCHAR)
++		return (NULL_ADDR_LIST);
++
++	if (isaddr (domain_name))
++	{		
++		struct route	*rp;
++
++		/*  For a single address, just return single list entry  */
++		addr_ptr = mallocw (sizeof (struct dns_addr_list));
++		addr_ptr->addr = aton (domain_name);
++		addr_ptr->cost = ((rp = rt_lookup (addr_ptr->addr)) != NULLROUTE
++		                  ? (int16) rp->metric
++		                  : (int16) MAXINT16);
++		addr_ptr->next = NULL_ADDR_LIST;
++
++		/*
++		 *  Could alternatively use reverse lookup in attempt to
++		 *  find all interface addresses but this might preclude
++		 *  debugging or forcing a particular address
++		 */
++
++	}
++	else
++	{
++		rrp = arrp = resolve_rr (domain_name, TYPE_A);
++
++		/* Search this list of rr's for an A record */
++		while (rrp != NULLRR)
++		{
++			if (rrp->type == TYPE_A && rrp->rdlength > 0)
++			{
++				struct dns_addr_list   *new_entry;
++				struct dns_addr_list   *last_ptr;
++				struct route           *rp;
++				int16                   cost;
++
++				/*  Calc routeing metric to order in preference  */
++				rp = rt_lookup (rrp->rdata.addr);
++				cost = (rp != NULLROUTE
++				        ? (int16) rp->metric
++				        : (int16) MAXINT16);
++
++				/*  search ordered list looking for insert point  */
++				last_ptr = NULL_ADDR_LIST;
++				addr_ptr = addr_list;
++
++				while (addr_ptr != NULL_ADDR_LIST)
++				{
++					if (cost < addr_ptr->cost)
++						/*  Insert here  */
++						break;
++
++					/*  move down list  */
++					last_ptr = addr_ptr;
++					addr_ptr = addr_ptr->next;
++				}
++
++				/*  Create new addr_list entry  */
++				new_entry = mallocw (sizeof (struct dns_addr_list));
++				new_entry->cost = cost;
++				new_entry->addr = rrp->rdata.addr;
++
++				/*  Add new entry at chosen point  */
++				if (last_ptr == NULL_ADDR_LIST)
++					addr_list = new_entry;			/*  at head  */
++				else
++					last_ptr->next = new_entry;
++
++				/*  link rest of list  */
++				new_entry->next = addr_ptr;
++
++			}  /*  if valid A record entry  */
++
++			rrp = rrp->next;
++
++		}  /*  while rrp list  */
++
++		free_rr (arrp);
++
++	}  /* !isaddr()  */
++		
++	if (Dtrace)
++	{
++		tprintf ("resolve_list(%s) returns:", domain_name);
++		addr_ptr = addr_list;
++		if (addr_ptr == NULL_ADDR_LIST)
++		{
++			tprintf (" NULL list\n");
++		}
++		else
++		{
++			unsigned int	count = 0;
++			tprintf ("\n");
++			while (addr_ptr != NULL_ADDR_LIST)
++			{
++				tprintf ("%5u:  %-15s  metric = %u\n", ++count,
++				         inet_ntoa (addr_ptr->addr), addr_ptr->cost);
++				addr_ptr = addr_ptr->next;
++			}
++		}
++	}
++
++	return (addr_list);
++}
++#endif	/* notdef */
+

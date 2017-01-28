@@ -1,0 +1,124 @@
+--- src/tzset.c	Sun Mar  7 17:07:42 1993
++++ src_rel/tzset.c	Thu Mar 27 17:54:50 1997
+@@ -6,6 +6,10 @@
+ *																			*
+ *	27 Feb 93	1.1		GT	From BSD ctime.c.								*
+ *	02 Mar 93	1.2		GT	Fix getenv () problem.							*
++*	12 Feb 96	1.3		GeK	Taken out tzsetwall(), added public _monthDay,	*
++*	         	    	   	fixed long = int * int cast in getsecs(),		*
++*	         	    	   	fixed declarations to match BC's,			 	*
++*	         	    	   	default to GMT and EU 'last Sunday' rules		*
+ *****************************************************************************
+ *	This file has been modified by Giles Todd.  These modifications are		*
+ *	Copyright 1993 Giles Todd, 5 Brentnall Close, Warrington, WA5 1XN, UK	*
+@@ -241,13 +245,13 @@ struct rule
+ static struct rule to_dst_rule =
+ 	{
+ 	MONTH_NTH_DAY_OF_WEEK,
+-	0, 4, 3, 2 * SECSPERHOUR
++	0, 5, 3, 1 * SECSPERHOUR	/*  GeK - default to last Sunday March, 1am GMT  */
+ 	};
+ 	
+ static struct rule to_std_rule =
+ 	{
+ 	MONTH_NTH_DAY_OF_WEEK,
+-	0, 4, 10, 2 * SECSPERHOUR
++	0, 5, 10, 2 * SECSPERHOUR	/*  GeK - default to last Sunday October, 2am BST  */
+ 	};
+ 
+ static long std_off;					/* STD offset						*/
+@@ -297,8 +301,8 @@ char _FAR * const _Cdecl tzname[2] = {
+ 	};
+ 
+ #ifdef USG_COMPAT
+-time_t timezone = 0;
+-int daylight = 0;
++long _Cdecl timezone = 0;	/*  GeK - declarations to match BC's  */
++int  _Cdecl daylight = 0;
+ 
+ #endif						 /* defined USG_COMPAT */
+ 
+@@ -580,7 +584,7 @@ long *const secsp;
+ 	if (strp == NULL)
+ 		return NULL;
+ 
+-	*secsp = num * SECSPERHOUR;
++	*secsp = (long) num * SECSPERHOUR;	/*  GeK - cast to fix long = int * int  */
+ 	if (*strp == ':')
+ 		{
+ 		++strp;
+@@ -1051,11 +1055,13 @@ struct state *const sp;
+ 
+ 	}
+ 
+-void _FARFUNC
++void _Cdecl _FARFUNC	/*  GeK - match BC decl  */
+      tzset ()
+ 	{
+ 	register const char *name;
++#ifdef	GEK_UNUSED	/*  Unused fn prototype  */
+ 	void tzsetwall ();
++#endif	/* GEK_UNUSED */
+ 
+ 	name = getenv ("GTZ");
+ 	if (name == NULL)
+@@ -1067,7 +1073,11 @@ void _FARFUNC
+ 			tzsetwall ();
+ 			return;
+ #else
++# ifdef	notdef		/*  GeK - default to GMT  */
+ 			name = "EST5";
++# else
++			name = GMT;
++# endif
+ #endif
+ 			}
+ 
+@@ -1103,6 +1113,7 @@ void _FARFUNC
+ 	settzname ();
+ 	}
+ 
++#ifdef	GEK_UNUSED	/*  GeK - not used anywhere  */
+ void
+      tzsetwall ()
+ 	{
+@@ -1127,6 +1138,16 @@ void
+ 
+ 	settzname ();
+ 	}
++#endif	/* GEK_UNUSED tzsetwall() */
++
++/*
++ *  GeK - added global array below to prevent the original tzset module being
++ *        included at link time by BC - stime() module also references this.
++ */
++unsigned _monthDay[] =
++{
++	0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334, 365
++};
+ 
+ #pragma startup tzset 30
+ 
+@@ -1149,8 +1170,10 @@ int pascal near __isDST (unsigned hour, 
+ 	time_t now;							/* epoch relative parameters		*/
+ 	time_t dst_start;					/* start of DST						*/
+ 	time_t std_start;					/* start of STD						*/
++#ifdef	notdef	/*  GeK - replaced with global public _monthDay array above  */
+ 	static unsigned long month_day[] =
+ 		{ 0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334, 365 };
++#endif	/* notdef */
+ 
+ 	/* Calculate the start of the year. */
+ 
+@@ -1173,7 +1196,10 @@ int pascal near __isDST (unsigned hour, 
+ 			  (lhour * 60L * 60L);
+ 	else
+ 		now = year_start +
++#ifdef	notdef	/*  GeK - modified to use global _monthDay array  */
+ 			  (month_day[month - 1] * 24L * 60L * 60L) +
++#endif	/* notdef */
++			  (((long)_monthDay[month - 1]) * 24L * 60L * 60L) +
+ 			  (lyday * 24L * 60L * 60L) +
+ 			  (lhour * 60L * 60L);
+ 
+
