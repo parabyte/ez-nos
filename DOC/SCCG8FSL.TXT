@@ -1,0 +1,735 @@
+SCC.TXT
+
+The SCC/ESCC driver for PC Clones
+
+Rewritten by Andrew Benham, G8FSL, based on original documentation
+by R.E. Janssen, PE1CHL.
+
+[updated to reflect status of G8FSL's SCC driver of Apr 1995]
+
+A driver has been written to support a number of Z8530/Z85C30
+SCC chips in PC Clones.
+Most of the commonly available SCC cards are supported, 
+including the Baycom USCC, PA0HZP's OptoPcScc, the DRSI PC*PA,
+PacComm PC-100,PC-110, PC120 and others.
+
+This latest version also supports Zilog's Z85230 ESCC chip, which
+features a larger FIFO and can therefore be used at 
+higher datarates (at a given interrupt latency).
+
+The SCC/ESCC driver can support any mix of SCC and ESCC chips, 
+provided that the CTRL and DATA ports of the chips are arranged 
+in some regular pattern. Each SCC or ESCC channel can be 
+independently programmed to support:
+
+	- An asynchronous SLIP line
+	- An asynchronous interface to a KISS TNC
+	- Direct AX.25 (HDLC)
+
+
+Initialization and attachment of the channels
+
+To use the driver, 2 steps must be performed:
+
+	1. Global initialization of the driver
+	2. Attachment of each channel, specifying mode and options
+
+The global initialization is needed to reset all SCCs and to 
+install a common interrupt handler. Also, the hardware addresses 
+of the chips are defined in this step. In the second step, each 
+channel is set up for the intended use.
+
+
+1. Initialization
+
+Initialization is performed using either the `easy attach' command
+syntax, or the "attach scc init" command. Older versions of the
+driver supported only the "attach scc init" command, but note that
+there is an additional field in this command in this version of the
+driver. 
+
+The `easy attach' syntax is:
+
+	attach scc <board label> baycom|drsi|opto <base address>
+		<interrupt number> [t<timing channel>]
+
+The "attach scc init" syntax is:
+
+	attach scc <board label> <number of chips> init <base address>
+		<spacing between chips> <offset to channel A ctrl>
+		<offset to channel B ctrl> <offset from ctrl to data>
+		<address of INTACK latch>|0 <interrupt number>
+		p<PCLK frequency>|r<RTxC frequency>
+		[<special interface type> <interface parameter> 
+		[t<timing channel>]]
+
+To initialize a PA0HZP OptoPcScc card one would use one of the
+following commands:
+
+	attach scc scc0 opto 150 5
+or:
+	attach scc scc0 2 init 150 4 2 0 1 168 5 p4915200
+
+Note that the two commands have an identical effect, merely that
+the first is very much easier to use (assuming one has a
+standard card).
+
+This specifies interrupt number 5, an often unused interrupt in 
+AT class PC Clones. The interrupt number used must match the
+interrupt number that you have selected on the board using a
+jumper or dip-switch. Also, the interrupt must not be in use
+by a different type of board in the system, e.g. a COM board
+or a disk controller.
+When using an AT-type machine (with two 8259 interrupt control-
+lers), and using the "interrupt 2" line on the BUS, specify 
+interrupt number 9 in the "attach scc init" command instead of 
+number 2. This better reflects the actual configuration: the 
+interrupt line labeled "interrupt 2" on the BUS is actually 
+connected to interrupt number 9 on the second 8259. The BIOS 
+will attempt the redirection of interrupt vector #9 to #2, but it 
+does not completely do the job. The result will be that the 
+driver hangs after some random amount of interrupts.
+
+The INTACK latch (write, then read to get the interrupt vector) 
+is located in this example at 0x168. It is also possible to specify
+0 for this address: in this case, INTACK is not used and the driver 
+finds the interrupting chip by polling each RR3A register. This 
+allows a more simple hardware design.
+
+The crystal clock is specified as 4915200 Hz (4.9152 MHz). Other 
+frequencies can be used, and this parameter should be adjusted 
+accordingly.
+The clock used for baud generation is connected to the SCC's 
+PCLK pin. It would also be possible to supply a baud clock to 
+the RTxCA/RTxCB pins, and a clock of a different frequency to 
+PCLK (like the processor clock). In this case, it is the RTxC 
+clock frequency that really matters for the "attach scc init" 
+command. This clocking method is supported by prefixing the 
+clock frequency with an "r" instead of a "p": r4915200.
+
+
+The "special interface type" and "interface parameter" fields in
+the "attach scc init" command can be used to specify some special
+type of interface board to be used. Adding more types of interface
+boards requires modification to the driver software.
+Currently, the following special types are supported on the PC:
+
+	- type 01: EAGLE
+	- type 02: PC-100, PC-110, PC-120
+	- type 04: PRIMUS
+	- type 08: DRSI PC*Packet
+	- type 10: Baycom USCC
+
+The PC-100 and the PRIMUS types accept an interface parameter, 
+that is used to control the on-board MODEM. It must be specified 
+as a hexadecimal value, to be sent to the output port on the 
+board.
+Possible initialisation commands are:
+
+EAGLE:		attach scc scc0 1 init 2e8 8 2 0 1 0 3 p3686400 01
+
+PC-100:		attach scc scc0 1 init 2e8 16 6 4 1 0 3 p4915200 02 82
+
+PRIMUS:		attach scc scc0 1 init 2e8 4 2 0 1 0 3 r2457600 04 02
+
+DRSI:		attach scc scc0 1 init 300 16 2 0 1 0 3 p4915200 08
+	(although the `easy attach' command:
+		attach scc scc0 drsi 300 3
+	 would be far easier here)
+
+
+When the DRSI card type is selected, the Z8536 CIO on the DRSI 
+card is initialized to provide two divide-by-32 counters (see 
+below).
+
+Control of the SCC transmitter in direct AX25 mode requires a timer
+tick to time transitions between states (for example, to time the
+"txdelay" period between keying the transmitter and starting to
+transmit data). For all card types, by default the system timer
+will be used to provide timer ticks, and it provides a 55 ms
+resolution.
+
+It turns out that multitaskers like Desqview treat the 55ms 
+system timer interrupt in such a way that a running task does not 
+receive all timer ticks. This results in random timing errors 
+when a program is running in another window. (you can observe 
+this as unusually long flag leaders and trailers when listening 
+to your own transmissions)
+Also, the 55ms timing interval may be somewhat long when higher 
+speeds are used (e.g. 9600 bps), and a finer control of the 
+TXDELAY timing is desired.
+
+When a spare SCC channel is available, it can be set up as a 10ms 
+timer, to be used instead of the system timer: add the option 
+"t<n>" at the end of the `easy attach' or "attach scc init" commands,
+where <n> is the channel number to be used for timing. When no
+"special interface type" and "interface parameter" options ar used,
+one or two zeroes must be inserted between the <frequency> parameter
+and the option, to hold their place. Example for use with the PA0HZP 
+OptoPcScc card:
+
+	attach scc scc0 2 init 150 4 2 0 1 168 3 p4915200 0 0 t3
+(again, the `easy attach' command:
+	attach scc scc0 opto 150 3 t3
+ would be far easier here)
+
+This defines channel number 3 (the last channel on the board) as 
+a timer tick generator.
+The timer tick generator defined this way generates 10ms ticks. 
+
+
+Memory Buffers
+
+The SCC driver uses the "memory nibufs" feature that pre-allocates
+a number of receiver buffers to be used by the driver at interrupt 
+time. Be sure to allocate a number of buffers ("memory nibufs")
+of a good size ("memory ibufsize") before you attach any of the
+SCC's channels (see below). The figures are a function of the
+number of channels you will attach, the baud of the channels,
+the activity on each of these channels, and the time the computer
+can spend without re-allocating new buffers.
+
+
+
+
+2. Attach commands
+
+When the SCC driver has been initialized, you can attach the 
+channels. This is done using one of 3 forms of the "attach scc" 
+or "attach escc" command:
+
+    attach scc <board label> <channel> slip <iface> <mtu> <baud> <bufsiz>
+    attach scc <board label> <channel> kiss <iface> <mtu> <baud> <bufsiz>
+              [<callsign>]
+    attach scc <board label> <channel> ax25 <iface> <mtu> <baud> <bufsiz>
+	      [[<callsign>] [s]]
+
+    attach escc <board label> <channel> slip <iface> <mtu> <baud> <bufsiz>
+    attach escc <board label> <channel> kiss <iface> <mtu> <baud> <bufsiz>
+              [<callsign>]
+    attach escc <board label> <channel> ax25 <iface> <mtu> <baud> <bufsiz>
+              [[<callsign>] [s]]
+
+These will be referred to as "slip", "kiss" and "ax25" mode.
+
+The <channel> parameter specifies which half of which SCC will be 
+programmed, as follows:
+
+	channel 0: "A" side of first SCC
+	channel 1: "B" side of first SCC
+	channel 2: "A" side of second SCC
+	channel 3: "B" side of second SCC
+
+and so on. The channel number ranges from 0 to (2 * nchips) - 1, 
+where nchips is the number of chips specified in the
+"attach scc init" command or implicit in the `easy attach' command.
+
+<iface> is the Jnos interface name to be assigned to the port, eg, ax0, sl2,
+tnc1.  <bufsiz> is a buffer size value, for async input fifos and sync mbufs.
+If an input fifo is too small, data loss will occur; mbufs, on the other hand,
+are chained to a new mbuf when full.  <baud> can be an integer value, possibly
+prefixed or suffixed by modifiers, or a keyword.  Read carefully below!
+
+
+SLIP mode
+
+This can be used for a link to another machine, when the channel 
+has an RS232 interface. Example:
+
+	attach scc scc0 0 slip sl0 256 9600
+
+This attaches the "A" side of the first SCC as interface "sl0", 
+with an MTU of 256 and an initial baud of 9600. The baud 
+can be changed later by:
+
+	param sl0 <baud>
+
+Entering just "param sl0" will display the current baud.
+
+
+KISS mode
+
+KISS mode can be used to talk to a KISS TNC. It can also be used 
+on an asynchronous link to another computer running NET.
+The difference with SLIP is that the interface will be AX.25 
+type, and can therefore be used for AX.25 connections. A 
+callsign must be given as a parameter, this will be used for IP 
+and NET/ROM purposes on the interface. Example:
+
+	attach scc scc0 2 kiss 430 256 4800 pe1chl-7
+
+In the example the "A" side of the second SCC will be attached as 
+interface "430" using an MTU of 256, a baud of 4800 and the 
+callsign PE1CHL-7.
+
+The command "param 430 <paramnum> <decimal value>" can be used to 
+set the parameters of the KISS TNC. It is not possible to 
+display the current settings.
+
+
+AX.25 mode
+
+This is probably the most interesting mode to use with this 
+interface. It allows AX.25 communication without a TNC. Only a 
+MODEM is needed. Example:
+
+	attach scc scc0 2 ax25 430 256 1200 pe1chl-7 s
+
+The parameters have the same meaning as in KISS mode. In fact, 
+the AX.25 mode is emulating an extended KISS TNC, so the same 
+commands can be used to set the parameters of the interface (see 
+below). Note that in AX25 mode there is an additional optional
+parameter which may follow the callsign: if this parameter ("s")
+is present, the channel will use a software derived DCD rather than
+the hardware DCD line.
+
+To be able to run fullduplex using an SCC (rather than an ESCC) in
+AX.25 mode, an external divider must be available. This is required
+to divide the baud generator clock available on the TRxC pin by
+32, and put the resulting signal on the RTxC pin of the same channel
+of the SCC. (The SCC requires a baud-rate*32 clock for receive, but
+a baud-rate*1 clock for transmit. Hence external hardware must divide
+the baud-rate*32 clock by 32 and supply this to the transmitter).
+Such a divider is not necessary for normal halfduplex CSMA packet 
+radio operation, as the driver will re-program the SCC baud 
+generator at each transmit/receive transition. Interrupt overhead 
+is slightly reduced if you still install it. If you have 
+installed the divider, prefix the baud with a letter "d", as 
+in:
+
+	attach scc scc0 2 ax25 430 256 d1200 pe1chl-7
+
+Note that when using the RTxC input as the baud generator 
+clock source, you will have to feed the exact rate of the 
+transmitter to TRxC to be able to use fullduplex. For this reason,
+it is better to use PCLK as the clocksource whenever possible.
+
+The DRSI PC*Packet adapter uses the Z8536 CIO on the board as a 
+divider, so you can (and should) specify the "d" option for that 
+board. The PA0HZP Opto card also provides external dividers, so
+the "d" option should be used with this card too.
+
+Another option is to use external clocking, supplied by the 
+MODEM. This is specified using the keyword "ext" in the baud 
+field, as in:
+
+	attach scc scc0 2 ax25 430 256 ext pe1chl-7
+
+The receive clock will be taken from the RTxC pin and the transmit 
+clock from the TRxC pin (except in the case of the Baycom USCC card,
+when the opposite is the case). Make sure the phase relationship 
+between the clock and the data is correct!
+
+For use with certain modems, most notably the DF9IC 9600 baud
+modem, NRZ encoding instead of the default NRZI can be selected by
+appending "/nrz" to the baud field (e.g. "d9600/nrz").
+The DF9IC 9600 baud modem provides internal NRZ-NRZI conversion.
+Note that NRZ encoding is used automatically on port 3 of the
+Baycom USCC card, which is connected to the on-card DF9IC modem.
+
+The SCC driver also allows complete specification of the clocking 
+mode, so that all modems requiring- or providing- external clocks 
+can be configured. The value to be written to WR11 of the Z8530 
+can be specified as a hexadecimal value after the existing 
+baud specification, separated by a colon (e.g. "d1200:66"). 
+Refer to a Z8530 technical manual for more information about the 
+value to be written to WR11.
+
+
+
+Attaching an ESCC (Z85230)
+
+Besides the original Z8530/Z85C30 SCC chip, the SCC driver also 
+supports the newer Z85230 ESCC chip. The main advantage 
+of the ESCC is the larger TX FIFO (4 bytes instead of 1) and RX 
+FIFO (8 bytes instead of 3), allowing a longer interrupt latency 
+without causing overrun/underrun errors. Therefore, the chip can 
+be used at the high edge of the speed range supportable using 
+interrupt-driven I/O (19200 and possibly 38400 baud). It also 
+solves some bugs in the original SCC, and has introduced a few of 
+its own... Unfortunately it is quite expensive, so for now 
+default choice is likely to remain the SCC.
+
+The presence of an ESCC is indicated to the driver by the use of 
+"attach escc" instead of "attach scc" to attach the channels.
+The driver will then automatically use the extra features of the 
+ESCC. The `easy attach' or "attach scc init" attach line can
+indicate either "scc" or "escc", with no difference in operation.
+The total set of chips driven by the SCC driver can be a mix of 
+Z8530/Z85C30 (SCC) and Z85230 (ESCC).
+
+The ESCC can run fullduplex without the external divide-by-32 
+counter, because an extra internal clock source selection has 
+been added to provide its function. Any external divider will be
+ignored.
+
+
+
+Parameters
+
+The setting of parameters of the emulated KISS TNC is done in the 
+same way as in the KISS mode of the SCC driver:
+
+	param <interface> <paramnum> <decimal value>
+
+In AX.25 mode however, it is also possible to display the current 
+settings using "param <interface>". This will result in a display
+like:
+	TxDelay: 40
+	Persist: 95
+	SlotTime: 10
+	TxTail: 10
+	FullDup: 0
+	DTR: 1
+	Speed: 1200
+	Group: 0
+	Idle: 120
+	Min: 3
+	MaxKey: 7
+	Wait: 50
+
+
+The "timer tick" unit mentioned in the descriptions for SCC channel
+parameters TxDelay, SlotTime, TxTail, Min, and Wait below depends on
+the SCC driver initialization.
+A timer tick is usually 55ms, but it can be 10ms is a timer tick
+channel has been selected in the `easy attach' or "attach scc init"
+commands (see above).
+
+Note that the exact time of each delay may be up to 1 timer tick time
+less than the specified time (since there is an unknown time period
+between waiting for a tick and the arrival of the tick). It is
+therefore unwise to specify a value less than 2 for a
+"timer tick"-relative delay (except when the special-case value 0
+is selected).
+
+Remember that if one is not using the default values for parameters
+TxDelay, SlotTime, TxTail, Min, and Wait , then changing the timing
+method will require re-calculation of the values of these parameters.
+
+
+The parameters have the following meaning:
+
+TxDelay:
+	The delay (in units of timer tick) after keying of the 
+	transmitter, until the first byte is sent. "flags" are sent 
+	during this period. This is usually called "TXDELAY" in a 
+	TNC. When 0 is specified, the driver will wait until the 
+	CTS signal is asserted, instead of waiting for a pre-
+	determined time. This assumes the presence of circuitry in 
+	the MODEM and/or transmitter, that asserts CTS when the 
+	transmitter is ready for data.
+	The default value of this parameter is 360ms.
+
+Persist:
+	This is the probability that the transmitter will be keyed 
+	when the channel is found to be free ("persistence"). It is 
+	a value from 0 to 255, and the probability is (value+1)/256.
+	Selecting a relatively low persistence decreases the chance 
+	that multiple stations send at the same time, when the 
+	channel becomes clear. The value should be somewhere in the 
+	range 20-60, and should be lowered when the channel is used 
+	more heavily.
+	The default value is 25 (10% persistence).
+
+SlotTime:
+	This is the time between sampling of the DCD state, to detect 
+	a free channel. It is expressed in units of timer tick.
+	About 100-300 ms seems to be a good value.
+	This parameter should never be 0. The transmitter will not 
+	key when 0 is used!
+	The default value is 160ms.
+
+TxTail:
+	The time the transmitter will remain keyed after the last 
+	byte of a packet has been transferred to the SCC. This 
+	extra transmission time is necessary because the CRC and a 
+	flag still have to leave the SCC before the transmitter is 
+	shut down. The value depends on the baud selected. A 
+	few character times should be sufficient, e.g. 30ms at 1200 
+	baud.
+	The value of this parameter is in timer tick units, the 
+	default is 30ms (or at least 2 clock ticks).
+
+FullDup:
+	The full-duplex mode switch. This can be one of the following 
+	values:
+	0:	The interface will operate in CSMA mode (the normal 
+		half-duplex packet radio operation).
+
+	1:	Fullduplex mode, i.e. the transmitter will be keyed at 
+		any time, without checking the received carrier (DCD).
+		It will be unkeyed when there are no packets to be 
+		sent.
+
+	2:	Like 1, but the transmitter will remain keyed, also 
+		when there are no packets to be sent. Flags will be 
+		sent in that case, until a timeout (parameter 10) 
+		occurs.
+
+	The default value is 0, CSMA operation. The fullduplex 
+	modes are only meaningful when a fullduplex modem and 
+	transceiver is in use, e.g. when accessing a packet 
+	satellite. Also, when using an SCC (Z8530 or Z85C30) and 
+	the internal baud generator, an external divide-by-32 
+	counter is required for fullduplex operation.
+
+DTR:
+	Control of the DTR output of the SCC. DTR will be set when 
+	this value is nonzero, it will be reset when the value is 0.
+	After initialization DTR will be set by default. The DTR 
+	output can be used as a general-purpose output, e.g. to 
+	change between 2 transceiver frequencies or output power 
+	levels.
+	The default value of this parameter is 1, DTR SET.
+
+Wait:	
+	The initial waittime before any transmit attempt, after the 
+	frame has been queued for transmit. This is the length of 
+	the first slot in CSMA mode. In fullduplex modes it can be 
+	set to 1 for maximum performance, or to a higher value to 
+	give NOS a chance to combine several packets in a single 
+	transmission.
+	The value of this parameter is in timer tick units. It should 
+	never be set to 0. (The channel will not transmit in that 
+	case)
+	The default value is 500ms.
+
+MaxKey:	
+	The maximal time the transmitter will be keyed to send 
+	packets, in seconds. This can be useful on busy CSMA 
+	channels, to avoid "getting a bad reputation" when you are 
+	generating a lot of traffic.
+	After the specified time has elapsed, no new frame will be 
+	started. Instead, the transmitter will be switched off for 
+	a specified time (parameter 9), and then the selected 
+	algorithm for keyup will be started again.
+	The value 0 will disable this feature, and allow infinite 
+	transmission time.
+	The default value is 7 seconds.
+
+Min:	
+	This is the time the transmitter will be switched off when 
+	the maximum transmission time (parameter 8) is exceeded.
+	This parameter is in seconds, and should never be 0.
+	The default value is 3 seconds.
+
+Idle:
+	In CSMA mode, this parameter specifies the maximum time the 
+	transmitter will wait for the channel to become clear, 
+	expressed in units of one second. When this time has 
+	elapsed without an opportunity to transmit, the transmitter 
+	will be keyed. This is a safeguard against situations where 
+	the squelch refuses to close, or a weak carrier is present 
+	on the frequency, to prevent an indefinite pileup of frames 
+	to transmit (with a possible danger of memory overflow). Of 
+	course, the value should be set sufficiently high to prevent 
+	accidental keyups in periods of high channel load, e.g. 60 
+	seconds.
+
+	In fullduplex 2 mode, this parameter specifies the maximum 
+	idle time, in seconds. When no frames have been sent for 
+	this time, the transmitter will be keyed down. A value of 0 
+	will disable this feature, i.e. the transmitter will be 
+	keyed indefinitely.
+	The default value of this parameter is 120 seconds.
+
+Not Implemented ??:
+	The DCD hold time, in timer tick units. Whenever DCD falls, 
+	the receiver remains enabled for <n> ticks. Setting this 
+	parameter to a suitable value will eliminate the packet loss 
+	caused by a flickering DCD, as can sometimes be observed 
+	with the G3RUH 9600bps FSK modem. Setting parameter 11 to 0 
+	will select the default operation, where the fall of DCD 
+	will immediately eliminate the packet being received.
+
+	This DCD handling option does not affect the "channel busy" 
+	detection that is performed in half-duplex mode (CSMA). The 
+	P-persistent channel access algorithm takes the unsmoothed 
+	DCD as input.
+
+Speed:
+	Can be used to change the bitrate of a channel after it has 
+	been attached. This command can only change the bitrate, it 
+	cannot change between internal/external clocking, fullduplex 
+	divider yes/no, etc.
+
+
+
+Transmitter Groups
+
+It is possible to build special radio equipment to use more than 
+one frequency on the same band, e.g. using several receivers and 
+only one transmitter that can be switched between frequencies.
+Also, you can connect several radios that are active on the same 
+band. In these cases, it is not possible, or not a good idea, to 
+transmit on more than one frequency. The SCC driver provides a 
+method to lock transmitters on different interfaces, using the 
+"param <interface> group <x>" command. This will only work when 
+you are using CSMA mode (parameter #5 = 0).
+
+The number <x> must be 0 if you want no group restrictions, and 
+can be computed as follows to create restricted groups:
+<x> is the sum of some HEX numbers:
+
+	100	This transmitter will only be keyed when the carrier 
+		detect of all other interfaces in the group is off.
+	200	This transmitter will only be keyed when all other 
+		transmitters in the group are off.
+	400	This transmitter will be keyed when all other 
+		transmitters in the group are either off, or are 
+		sending flags (TXDELAY period).
+	0xx	A byte that can be used to define different groups.
+		Interfaces are in the same group, when the logical AND 
+		between their xx values is nonzero.
+
+Examples:
+	When 2 interfaces use group=101, the transmitters will only 
+	key when both channels are clear at the same time.
+
+	When 2 interfaces use group=201, their transmitters will 
+	never be keyed at the same time.
+
+	When group=301, the transmitters will not be keyed at the 
+	same time, and only if both channels are clear.
+
+
+
+Maximal packet length
+
+Input packets on the SCC driver and the SLIP and KISS protocols 
+on async ports are checked for a maximal length. Packets longer 
+than the MTU of an interface plus the header overhead (for AX.25) 
+are discarded.
+This is necessary, because otherwise very long packets could be 
+received and stored into memory, causing unnecessary use of 
+buffers.
+Make sure the value of MTU specified in the "attach" commands is 
+correct (i.e. 256 for normal AX.25 use), as there is no 
+indication for packets that are ignored because they are too 
+long.
+
+
+
+SCCSTAT command
+
+Once the SCC driver has been initialized, some statistic 
+information can be shown using the sccstat command. The output of 
+this command shows one line of information per attached channel.
+
+Example:
+
+nos> sccstat
+Board: scc0
+Ch Iface  Sent  Rcvd Error Space Overr Rxints Txints Exints Spints
+ 0 144      88   152   200     0     0  10013   4488    905    235
+ 1 430       6    70     0     0     0   1915     29      0      0
+
+The info shown is:
+
+	- board label
+	- channel number of the attach command,
+	- name of the interface,
+	- number of frames queued for transmission,
+	- number of frames received correctly,
+	- number of receive errors (CRC, ABORT),
+	- number of times the receiver buffer pool was found empty,
+	- number of receiver overruns and transmitter underruns,
+	- number of receiver interrupts,
+	- number of transmitter interrupts,
+	- number of receiver special condition interrupts,
+	- number of external/status interrupts.
+
+It is normal that a SLIP or KISS channel shows no errors, and no 
+special condition or external/status interrupts, while an AX25 
+channel has lots of these.
+
+An overrun is abnormal for all operating modes. If lots of these 
+occur, the product of baud and number of interfaces is too 
+high for the processing power of your computer.
+
+If "Space" errors occur, specify a higher number of buffers in 
+the "memory nibufs" command.
+
+When you see only transmitted frames, the number of transmitter 
+interrupts is 1, and all other counters are 0, the SCC is not 
+generating interrupts to the computer. The single transmitter 
+interrupt is a "simulated" interrupt that should start the 
+transmission (but apparently doesn't).
+
+When an interface name is specified in the "sccstat" command, 
+more detailed information for that interface is displayed:
+
+nos> sccstat 144
+Iface  Sent  Rcvd Error Space Overr Rxints Txints Exints Spints
+144      88   152   200     0     0  10013   4488    905    235
+
+Ctrl=334 Data=330  LastStatus=7c
+WR0=00  WR1=13  WR2=00  WR3=c9  WR4=20  WR5=e9  WR6=00  WR7=7e
+WR8=00  WR9=09  WR10=a4 WR11=66 WR12=3e WR13=00 WR14=03 WR15=88
+TxState=0 TxTimer=0 RxOvr=0 TxUndr=0
+
+The extra information displayed is:
+
+	- the CTRL and DATA register addresses for the channel,
+	- the last STATUS value that was read from the SCC,
+	- the last values written to the sixteen Write registers,
+	- the current transmit state number,
+	- the current values of the transmitter timing downcounters,
+	- and the number of Receive Overruns and Transmit Underruns.
+
+The number shown under the "Overr" header is the sum of the 
+receiver overruns and transmitter underruns shown in the detail.
+Most other information is only understandable when an SCC 
+technical manual is used for reference.
+
+The transmit state numbers are:
+
+	0	IDLE	Transmitter off, no data pending
+	1	DEFER	Receive Active - DEFER Transmit
+	2	KEYUP	Permission to keyup the transmitter
+	3	KEYWT	Transmitter switched on, waiting for CTS
+	4	ACTIVE	Transmitter on, sending data
+	5	FLUSH	CRC sent - attempt to start next frame
+	6	TAIL	End of transmission, send tail
+
+
+
+Multiple Cards
+
+
+Whilst it is comparatively easy to use one card in a machine, it
+is less clear how several cards may be used.
+
+There are two methods, for two different scenarios.
+
+Firstly, it may be possible to attach two (or more) identical cards
+in such a way that a regular spacing between chip addresses is
+achieved. If this is the case, then the "attach scc init" command
+can be used to attach all chips with one command.
+
+For (an untried!) example, Eagle cards could be configured at
+addresses 0x2e8 and 0x2f0.
+Then an "attach scc init" command of:
+
+	attach scc scc0 2 init 2e8 8 2 0 1 0 3 p3686400 01
+
+would attach both cards- the parameter value "8" being the spacing
+between chips.
+
+
+As an alternative, two (or more) cards may be attached by using
+one `easy attach' or "attach scc init" command per card - specifying
+a unique board label for each card. Note that all such commands must
+specify the same interrupt number, and that a maximum of one timing
+channel may be specified.
+
+
+However multiple cards are attached, all cards must share the same
+interrupt number. This will almost certainly require hardware
+modifications to the cards, as the PC bus architecture does not
+normally support multiple cards on one interrupt.
+
+In addition, if any one card uses INTACK then all cards must use
+INTACK and all must share the same INTACK latch address.
+

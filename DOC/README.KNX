@@ -1,0 +1,64 @@
+Changes to Jnos 1.11e to yield version 1.11f:
+
+mboxcmd.c			Right-justify login count in ML cmd.
+
+rspf.c				Fixed bugs leading to crashes under Linux.
+
+unixasy.c			Make default lockdir be /var/lock.
+
+z8530.asm			Optimize read loop for 80186 or better cpu.
+
+smtpserv.c			Ignore zero-netmask ifaces in SMTP_DENY_RELAY.
+
+version.c			Minor changes to info cmd display.
+
+nntpserv.c			Handle missing Active file in 'nntp create'
+
+kiss.c				Don't filter kiss cmds sent to TNC. (G8ECJ)
+
+trace.c				Allow color traces to any destination (file or
+				remote sysop) if -gN value is biased by 4. G8ECJ
+
+ttylink.c			Display incoming ttylink attempts in the cmd
+				session if busy (G8FSL)
+===============================================================================
+Minor nit: the login count column of the ML (mbox past) cmd is now
+right-justified.
+
+Ron, VE3CGR reported a problem with RSPF under Linux, working with DOS Jnos
+rspf.  I corrected some typos and added some checks in rspf.c to prevent
+crashes.
+
+Most (all?) recent Linux releases use /var/lock as the system's lockdir.  I
+thereform changed unixasy.c to use this dir; see note (7) in readme.lnx if
+this change breaks locking on your Linux system.
+
+Piotr, SP3UQS contributed an enhancement to the z8530.asm module when compiled
+for a 80186 or better cpu: 'insb' instead of 'in al,dx  + stosb'.
+
+I changed the SMTP_DENY_RELAY code in smtpserv.c to never use a netmask of
+zero to determine if a sending host is in one of our subnets.  This should
+help Jnos resist spamming!
+
+I changed doinfo() in version.c to show more info about compile-time-selected
+features, especially BOOTP, NNTPS and SMTP features, UDP clients, and DOS
+debugging features.
+
+I found that the 'nntp create' command failed when the Active file didn't
+exist yet.  Since all the other files in the news directory are created as
+needed, so now is Active.  Change made in donncreate() in nntpserv.c.
+Also, the stack sizes were increased for the NNTPS server and client tasks.
+
+I added G8ECJ's mod to kiss.c, to not filter which cmds are sent to the
+TNC, since new tncs support more cmds.  The previous behaviour can be restored
+by compiling with KISS_PARAM_FILTER #define'd.
+
+I added G8ECJ's mod to trace.c, to use colors in non-system-console trace
+destinations, provided Jnos was started with a -gN value biased by 4, that is,
+use -g5 for grey-scale monitors and -g6 for color monitors.  Note that tracing
+to a file with -g5 or -g6 in effect will produce ANSI escape sequences in the
+trace file.
+
+I modified slightly Andrew G8FSL's mods to ttylink.c to display ttylink
+connect attempts in the cmd session window while the sysop was busy (unless
+TTYLINK_NO_INTERRUPTIONS was #define'd).  A log entry is made too.

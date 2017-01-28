@@ -1,0 +1,143 @@
+                Mailbox Command Cryptsheet.             (last update 7/22/95
+                ---------------------------              for JNOS 1.10L )
+
+All commands listed refer to the JNOS / NOS.EXE program
+as distributed by Johan. K. Reinalda, WG7J/PA3DIS.
+
+This describes JNOS v1.10L
+
+For a full description of a command, use the 'HELP' command.
+To get the version of the system you're using, type the 'I' command.
+
+NOTE: not all commands might be available in each system. This depends
+on the options compiled into the program, as well as on the options the
+sysop makes available to users.
+
+<cr>            Hitting a return causes the next message (if any) to be read
+
+?               Give short list of all commands
+
+A               Give list of message areas without descriptions
+AF              Give the areas list with descriptions (if set)
+AF name         Give more information about the specified area (if available)
+AN              Show the areas that have new mail since you last logged off
+A name          Change to area 'name'
+
+ALI             Shows command 'aliases' as set by the sysop. These are short
+                ways of typing long commands.
+
+B               Bye (ie. disconnect)
+
+C node          Netrom connection, if permitted and available
+C port call     AX.25 connection, if permitted
+
+CA              Connect to callbook server (if available)
+
+CONV [chan]     Convers bridge (like Dx-CLUSTER), if available
+                Default is channel 0, or [chan] (if given).
+
+D filename      Download textfile 'filename'
+DU filename     Download a uuencoded file (for binary files)
+DX filename     Download with xmodem (for tip connects)
+DM              Download (ie, display) message-of-the-day
+
+E               Show the escape character
+E char          Set the escape character to 'char' (one character!)
+
+F               Finger users on this system or remote tcp systems
+                'F conf' will show conference bridge users.
+                'F iheard' will show the ip-heard list.
+                For local users, this will now show when the user was last
+                logged in to the system. Eg 'F wg7j'
+                For remote tcp systems 'F @host' shows all users on 'host'
+                or 'F user@host' shows 'user' on system 'host'
+
+H               Help
+H x             Get help on command x
+
+I               Info on system. Shows a message set by the sysop
+
+IH              IHeard, shows recently heard tcp/ip stations
+
+IP              IProute, shows the tcp/ip routes the system maintains
+
+J               Just heard, on all sysop-enabled ports
+J port          Just heard on 'port'
+
+K n n           Kill message # n (one or more numbers or ranges is accepted)
+KM              Kill Mine, kills all read messages
+KU              Un-kills messages previously marked to be killed
+
+L               List new messages
+LA              List ALL messages in current area
+LB              List messages with message type B (bulletins)
+LH              List Held messages.  All msgs in current area are checked.
+LM              List mine, lists new messages
+LL n            List last n messages
+LT              List message with message type T (traffic)
+LS xyz          List messages with string 'xyz' in subject
+L> xyz          List only messages with string 'xyz' in the To: field
+L< xyz          List only messages with string 'xyz' in the From: field
+
+M               Shows current mailbox users
+MC name         Copy the current message to area/path 'name' (SYSOP only)
+MC x [y,z] name Copy messages x,y and z in current area to area/path 'name'
+ML              Shows all past users since system startup
+ML n            Shows the n past users since startup
+ML call         Shows when 'call' logged on last
+MM name         Move the current message to area/path 'name' (SYSOP only)
+MM x [y,z] name Move messages x,y and z in current area to area/path 'name'
+MS              Show message and system status
+
+N               Alphabetical listing of known netrom nodes (if available)
+NR              Shows all netrom neighbour nodes
+N nodename/call Shows information about the route to the node
+N *             Shows infomation about all nodes (Long!)
+
+O               Chat with operator (if system is attended)
+
+P               Give a list of the ax.25 ports of the system (and description,
+                if set by sysop)
+
+PI host         Ping a tcp/ip host (ie. check if it is 'alive').
+                This shows the round-trip-time to the system.
+
+R n             Read message n (a list of numbers or ranges is accepted)
+RH              Read all Held messages (SYSOP only).
+RM              Read Mine, reads all unread messages
+
+REG             Register as a user on this bbs
+
+S               Send message (defaults to private)
+SB              Send bulletin (be carefull!)
+SC              Send with Carbon Copy to others
+SF              Forward current message to someone else
+SP              Send private message
+ST              Send traffic message
+SR              Send a reply to the current message
+SR n            Send a reply to message number n
+
+T host [port]   Telnet to 'host' (if permitted) (the optional port specifies
+                a tcp port if other then the telnet port)
+
+U file          Upload a textfile
+UX file         Upload a textfile with xmodem (for Tip users)
+
+V n             Verbose read of message n (a list or range is accepted)
+VH              Verbose read of all Held messages (SYSOP only).
+VM              Verbose read of all unread messages
+
+W               What files are in the current directory
+W path          Listing of the directory 'path'. Wildcards ie, *, are accepted
+
+X               Toggle Expert status
+XA              Toggle current area-indication in prompt
+XM              Show number of lines before more-prompt
+XM n            Set more-prompt to n lines
+XN              Toggle the 'Netrom look-alike' prompt on/off
+XP              Toggle LINEMODE-style prompting for input (telnet/tip users)
+XR              Show if a 'reply-to: your-email-address' is added when sending
+                mail. You need to have set an email address with 'REG'
+XR on|off       Sets the 'reply-to' state to on or off
+
+Z file          Zap (delete) a file (if permitted)

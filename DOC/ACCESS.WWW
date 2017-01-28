@@ -1,0 +1,10 @@
+# This file goes into the /spool directory and controls HTTP access rights.
+# Lines either specify a directory path at and below which access is denied,
+# or specify a {path, realm, encoded_user:passwd} sequence to which access
+# is permitted only if the encoding matches that provided by the client user.
+# Be careful who can modify this file (eg, by ftp upload)!  Also, it MUST
+# exist, even if empty, to allow any http accesses.
+#
+#  path relative to wwwroot      realm      encoded "user:password" w/o '"' chars
+/pub/jnos/www/unzipped/secret SecretPlace Z3Vlc3Q6aGVsbG8=
+/pub/jnos/private

@@ -1,0 +1,111 @@
+#! /bin/sh
+
+# Script to invoke the Unix Jnos.
+# Usage:  dojnos [-gdb|-inittab] [optional_args]
+# where -gdb means to invoke the gdb debugger with Jnos
+#       -inittab is followed by VC-device, terminfo-name and optional Jnos args
+#       (otherwise an interactive invocation is assumed).
+# Example inittab entry:
+#	7:2345:respawn:/home/jpd/jnos/dojnos -inittab /dev/tty7 linux -C
+#
+# CHANGE THE DEFINITIONS FOR jnosroot AND autoexec, THE $local, $remote AND
+# $mtu VALUES BELOW, AS WELL AS ANY VARIABLES CONTAINING "n5knx":
+
+jnosroot=/home/jpd/jnos
+autoexec=autoexec.nos
+
+cd $jnosroot
+rm spool/mqueue/*.lck 2>/dev/null
+
+QRZDRV=/mnt/cdrom
+MSGUSER=n5knx
+USER=n5knx
+export QRZDRV MSGUSER USER
+# Add some more to allow access even when ftpusers is damaged:
+# YOU MUST 'CUSTOMIZE' THE NEXT 3 LINES OR YOU WILL HAVE A BIG SECURITY FLAW.
+NOSSYSOP=n5knx
+NOSPASSWD=badtrouble
+NOSPATH="/ 0x24037f"
+export NOSSYSOP NOSPASSWD NOSPATH
+
+# Now see if we are under a Sun O/S, to bypass the dip stuff for now
+if [ `uname -s` != SunOS ]; then
+
+if [ "$1" = "-inittab" ]; then
+	shift
+	REDIRECTO="> $1 2>&1"
+	REDIRECTI="< $1"
+	TERM=$2
+	shift; shift
+elif [ $TERM = xterm ]; then
+	TERM=linux	#xterm-color	# xterms is another possibility
+fi
+eval tset $REDIRECTO 2> /dev/null
+
+# See if we already have a DIP process running for ptype
+DODIP=1
+ps ax|grep -e "-dip (" > /tmp/dip.$$
+if [ -s /tmp/dip.$$ ]; then
+	grep -q " pe " /tmp/dip.$$
+DODIP=$?   # 0 => dip already running
+fi
+
+# But if slattach is involved don't use DIP
+if [ $DODIP ]; then
+	ps ax|grep -e "slattach.*ptype"|grep -v grep > /tmp/dip.$$
+	if [ -s /tmp/dip.$$ ]; then
+		DODIP=0		# slattach already running
+	fi
+fi
+
+# Establish a slip link from Linux via pseudo-tty "e" to a Jnos task
+# (use 'dip -k' to kill dip daemon)
+if [ $DODIP -ne 0 ]; then
+eval dip -t $REDIRECTO << \=EOF=
+port ptype
+get $local p-n5knx.aara.org
+get $remote p-n5knx.ampr.org
+get $netmask 255.255.255.0
+get $mtu 1500
+# was 236
+mode slip
+proxyarp
+exit
+=EOF=
+fi
+
+rm /tmp/dip.$$
+# It seems that the proxyarp DIP cmd is failing...so we do it ourselves.
+# We want the Linux ip stack to respond to ARPs for the Jnos IP addr,
+# for those packets received via eth0 (ethernet).
+arp -Ds p-n5knx.ampr.org eth0 pub
+
+
+# Corresponding to the above slip setup, are matching Jnos attachments:
+# attach asy ttype 0 slip linux 3000 1500 9600   # was 1536 236 9600
+# asyconfig linux txq 15
+# asyconfig linux rxq 15
+
+fi
+
+# Rename any existing core file so we can use GDB later to debug it
+if [ -f core ]; then
+	mv core core.`date "+%y%m%d-%T"`
+fi
+
+# Rename any existing proclog file (Jnos kernel debug option)
+if [ -f proclog ]; then
+	mv proclog proclog.`date "+%y%m%d-%T"`
+fi
+
+# OK, do we need to run via gdb?
+if [ "$1" = "-gdb" ]; then
+	shift
+	echo TO INVOKE JNOS, USE: run -g2 $@ -d $jnosroot $autoexec
+	echo ...
+	gdb ./jnos
+else
+	eval exec ./jnos -g2 -Scurses:8bit $@ -d $jnosroot $autoexec $REDIRECTI $REDIRECTO
+fi
+
+echo "exec of jnos returned ... error code is $?"

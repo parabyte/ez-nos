@@ -1,0 +1,249 @@
+The Jnos source distribution zipfile contains both MSDOS and UNIX sources.
+The only UNIX system fully tested so far has been Linux, under kernel 2.0.18
+through 2.2.9 but other versions are likely to work also.
+The UNIX port was done initially by Brandon Allbery, KF8NH, for the 1.09
+release.  I've made a few changes to get it working under the 1.11* release
+series, but Linux is still evolving, so see the notes below for information
+on how to adapt Jnos to your system.
+
+Differences with respect to MSDOS Jnos:
+
+1. New commands: asyconfig, sessmgr  (see their helpfile in cmdshlpX.zip).
+2. Modified commands: attach, asystat  (see their helpfile too)
+3. Missing commands:
+   a) commands related to hardware drivers (sccstat, pkstat, etc)
+   b) commands related to MSDOS:  isat, multitask, watch, watchdog
+4. Missing features:
+   a) meaningless under UNIX: EMS, XMS, PACKET, STKTRACE, SHOWIDLE, SWATCH,
+	ARCNET, PC_EC, and probably others
+   b) not ported (yet?): TED, MEMLOG
+5. New features:
+   a) tracing, and other session screen writes, occur even when that session's
+	screen is not displayed.  Use flow control to prevent missing lines
+	which scroll off the screen (eg, session N flow ON).
+   b) scheduling is more efficient than under MSDOS, since there can be fewer
+	timer interrupts while idle, rather than one each 55 ms.
+   c) no (or almost no) memory limits on what features are compiled in!
+   d) Jnos logins are distinct from UNIX logins, that is, Jnos provides a
+	separate subsystem.
+   e) Access to the Linux ip services can be accomplished, when desired, by
+	using a SLIP protocol link to a pseudo-tty, which is managed from
+	the UNIX side by "dip" or "slattach" or similar programs.
+	The Linux daemons mkiss, rxecho, and ax25ipd may prove useful in
+	connecting Jnos to Linux kernel services; see ax25-utils-2.1.*/etc/
+	oh7lzb/* for details.
+   f) Command prompt shows memory used, in KB, rather than memory available
+	(which is quite large, virtual in fact, under UNIX).
+   g) You should use the -d <jnosroot> option when invoking Jnos, so that
+        absolute pathnames can be determined, or else use -f nos.cfg which
+        itself contains absolute pathnames.
+
+To-Do:  (these from Brandon's original commentary):
+
+* Implement fkeys.  This will take some work, as I can't use KEY_* from
+  ncurses (it blocks).  On the other hand, since I've already *got* key trie
+  code, all I really need is tigetstr().  This also means that fkey can take
+  key names from terminfo instead of cryptic numbers (not that the terminfo
+  names are necessarily all that much better, mind you.... :-)  Yet again,
+  though, the issue of session managers complicates this.
+
+* Finish session manager support and detached consoles.  The folks who have
+  to wait for me to start X so they can digi through me will undoubtedly thank
+  me for this :-)  N.B. This will take real work.  Don't expect it soon.
+
+* Use a Unix format for ftp's LIST and NLST commands.  I'm holding off until
+  I decide how to best map DOS attributes:  if I do this it will be usable
+  under both, since some folks have requested a format that will work with
+  point-and-shoot ftp client front-ends.  N5KNX:  well, UNIX_DIR_LIST #define
+  fudges some UNIX-like results, but a true display could be done...
+
+
+How to compile and configure your own version of UNIX Jnos:
+
+1)	Load the release source zipfile into an empty directory, then
+	extract the contents without CRs:  unzip -aL jn111?.zip
+
+2)	[OPTIONAL] Load an ncurses library tgz file into a different directory,
+	say /usr/local/src.  Note that the 1.9.9e (or later) version of ncurses
+	is provided with many Linux distributions, and will work fine with Jnos
+	1.11c and later.  There is thus no reason anymore to avoid the stock
+	ncurses library, but if you really want to use a different version,
+	several are available from ftp://pc.louisiana.edu/pub/ham/jnosutil/ .
+	Transfer one to your system, then extract the source and build the lib:
+
+2a)	Using version 1.8.5 (ncurs185.tgz):
+		cd /usr/local/src
+		mkdir ncurs185
+		cd ncurs185
+		zcat ncurs185.tgz | tar xvf -
+		cd src; ./Configure	>>> pick choice (1) Linux
+		make libncurses.a
+		ln -s terminfo.h term.h
+		ls -l libncurses.a
+
+2b)	Using version 4.0 (ncurses-4.0.tgz):
+		cd /usr/local/src
+		zcat ncurses-4.0.tgz | tar xvf -
+		cd ncurses-4.0
+		./configure --prefix=/usr --datadir=/usr/lib
+		make all > make.out 2>&1	(sh/bash/ash)
+	-or-	make all >& make.out		(csh/tcsh)
+		ls -l lib/libncurses.a
+
+2c)	Using version 4.2 (ncurses-4.2.tgz):
+		cd /usr/local/src
+		zcat ncurses-4.2.tgz | tar xvf -
+		cd ncurses-4.2
+		./configure --prefix=/usr --datadir=/usr/lib
+		make all > make.out 2>&1	(sh/bash/ash)
+	-or-	make all >& make.out		(csh/tcsh)
+		ls -l lib/libncurses.a
+
+
+3)	Prepare for the Jnos compilation:
+		cp unixconf.h config.h
+		mv makefile.lnx Makefile
+
+	[OPTIONAL:] Edit config.h to disable undesired features.  The
+	distribution version has almost everything turned on, and will produce
+	a LARGE binary called jnos.  But, see also the comments in Makefile.
+
+	Edit Makefile, setting the proper value for ICURSES and LCURSES.
+	The distribution values assume step (2) was done, verbatim!
+
+	For those of you new to Linux, and unskilled in a "Unix" editor,
+	the mc (Midnight Commander) may be familiar to you (a la dos NC).
+
+4)	Compile Jnos:
+		make clean
+		make depend		(makedepend prog is in Slackware X pkg)
+		make > make.out 2>&1	(sh/bash/ash shells)
+	=or=	make >& make.out	(csh/tcsh shells)
+		make mail2ind		(if desired)
+
+	A binary program called jnos will result, and two other utilities,
+	dumpdate and u2j, will be created.  Note that you must edit u2j.c
+	and rerun make, to use it to inject Linux email into the Jnos spool
+	directory for processing by Jnos.  Note also that a large number of
+	compiler complaints are put into make.out, BUT they are all warnings
+	and the compiler has done the right thing.  Do read the Makefile to
+	see Brandon's comments about this and other issues.  If make says
+	it can't find the makedepend program, you might need to load it
+	from the Slackware X package (or the Debian xlibg6-dev pkg).
+        If makedepend can't be made to work, that's OK.  Just remove all
+        lines in the Makefile after the DO NOT DELETE line, skip over the
+        'make depend' step, and be sure to always do a 'make clean' before
+        each 'make' of Jnos.
+
+5)	Prepare a directory to contain the Jnos runtime files, spool
+	directory, etc.  You may wish to copy files from a working MSDOS
+	Jnos install, but be sure to eliminate the CR chars!  If you have a
+        dos2unix command, use it to eliminate the CRs, or perhaps mtools' -t
+        option might help, or as a last resort use: tr -d '\015' <in >outfile.
+        The Jnos help files are distributed with DOS naming conventions, ie,
+        truncated at 8 characters.  Those commands with longer names should
+        either have their helpfile renamed to the full name, or Jnos should
+        be compiled with DOS_NAME_COMPAT #define'd in config.h.  Also note
+	that Jnos will create needed directories itself if they don't
+	already exist.  Into this directory, copy (or symlink) the jnos
+	binary.  You may wish to examine and edit the file "dojnos" which
+	is a script to start DIP to allow Jnos to communicate with Linux
+	via a slip pseudo-tty link, and then start Jnos.
+
+	Remember that in DOS, upper, lower and mixed case filenames were
+	equivalent.  This is not so in Linux, and you will normally use
+	lower case names, especially in the config files in the Jnos root
+	dir and in the spool dir.
+
+	You will want to add asyconfig commands to your autoexec.nos file,
+	to set txqueue and rxqueue values for any serial and pseudo-slip
+	links you may have.   See the asyconf helpfile.  Also, remember
+	to use Linux naming for COM ports: com1 is cua0 or ttyS0.  The
+	irq spec on the attach cmd is ignored by Linux; see the attach
+	helpfile section on Linux attach asy.  If you want Jnos to talk to
+	the Linux system, and vice versa, you should compile with SLIP
+	#define'd in config.h, and configure a slip interface in Jnos.
+	See the comments and examples in "dojnos".
+
+	Finally, you should have the IP_FORWARDING feature compiled into the
+	Linux kernel, and enabled, if you plan to use Linux as an IP gateway
+	for Jnos.  Something like "echo 1 > /proc/sys/net/ipv4/ip_forward"
+	may be required.
+
+6)	Recall that Jnos was linked with an ncurses library, and also that at
+	run time, this library will need to find the terminfo database.  This
+	may have been already provided if you loaded the "standard" ncurses
+	package when you configured your Linux system; if not, you may have to
+	install the ncurses distribution you picked.  In any case, check that
+	one of the two directories exist:
+		/usr/share/terminfo  -or-  /usr/lib/terminfo
+	Whichever one is missing, should be symlinked to the one that exists:
+		ln -s /usr/share/terminfo /usr/lib     (if no /usr/lib/terminfo)
+	-or-	ln -s /usr/lib/terminfo /usr/share   (if no /usr/share/terminfo)
+
+	If you forget to set this up, you might see this error message:
+	Error opening terminal: linux   (or xterm, or something similar).
+
+7)	Jnos will create lock files to prevent simultaneous access to asy
+	devices.  The default Linux lock directory is /var/lock; if this
+	directory doesn't exist, it probably means your system uses a
+	different directory, perhaps /var/spool/locks.  If this is the case,
+	Jnos will complain about being unable to create a lock file; you should
+	create a symlink /var/lock, pointing to the correct lock dir:
+		cd /var; ln -s /var/spool/locks lock
+	The adventurous might instead #define LOCKDIR "/var/spool/locks"
+	in config.h.
+
+8)	If you need a Linux version of the DOS import.exe, obtain
+	ftp://pc.louisiana.edu/pub/ham/jnosutil/bmh02src.zip   and build the
+	import program by: unzip -aL bmh02src.zip; make import  .
+
+	If you want an external mail program which interfaces with the
+	Jnos mail spool, try the "bmh" program in this same zipfile;
+	"make bmh" will compile the bmh program.  Don't forget to configure
+	it in your .bmhrc file.  The issue here is that to prevent simultaneous
+	update of a mailbox file, the external mail program must use the same
+	mailbox lock mechanism as Jnos (i.e., create a .lck file).
+
+9)	Jnos needs to create lock files, and read and/or update the files
+	under its home directory.  You may choose to run it under user root,
+	but this is considered bad practice under Unix!  You could use the
+	chroot feature of the -d command-line option (see readme.now), or
+	you could run jnos under another user id.  The uucp group typically
+	has rwx access to the Linux lock directory, so it is logical to make
+	Jnos set-group-id to uucp when it is not running as root:
+		chgrp uucp jnos; chmod g+s jnos
+
+10)	If you use gnome and want to run Jnos from a panel icon, first get the
+	dojnos script working.  Then, pick a panel icon from gnome xterm panel,
+	name it "jnos" and insert the full path to dojnos into the "Command"
+	window.  You do not need to pick "run in terminal". (tnx to ik5bcu)
+
+11)	If you find bugs, please report them to nos-bbs@hydra.carleton.ca,
+	indicating which Linux version of ncurses, gcc, and Jnos were involved.
+	The ncurses version is shown in the "info" command output.  The gcc
+	version is shown by "gcc -v".  Note that if Jnos quits for no apparent
+	reason, you may have encountered a SEGFAULT or other fatal error.
+	If you ran Jnos with the -C option, you may have a file called "core"
+	which contains the state of Jnos at the time of the error.  You can
+	assist me in finding the problem, if you add the following commands'
+	output, contained in the file for.knx, to your report:
+		script for.knx
+		gdb jnos core
+		bt
+		quit
+                exit (or control-D, depending on your shell)
+
+	If your Jnos crashes but does not produce a core file even when you
+	used the -C option, it might by due to running Jnos as a set-userid
+	or set-groupid program.  Try invoking it manually after obtaining the
+	necesary privileges yourself (perhaps via 'su') and issuing
+		chmod ug-s jnos 
+	Another cause might be that the core file size exceeds a default
+	limit.  The coredumpsize limit can be changed by the limit or ulimit
+	command, depending on which Linux and shell you use.
+
+
+-- James Dugal,N5KNX
+jpd@louisiana.edu
+n5knx@k5arh.#lft.la.usa.noam

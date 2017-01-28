@@ -1,0 +1,126 @@
+How to compile your own version of Solaris Jnos:
+
+0)	Read readme.lnx to get a feel for the Unix differences, stopping at
+	the compilation steps.
+
+1)	Load the release source zipfile into an empty directory, say
+	$HOME/jnos/src, then extract the contents without CRs:
+		cd $HOME; mkdir -p jnos/src; cd jnos/src
+		unzip -aL jnos111c.zip
+
+2)	Load the required ncurses library tgz file into a different directory,
+	say $HOME/jnos/ncurses-4.2.  At present, ncurses-4.2 has been qualified
+	for use with Jnos; no other versions have been tested.  4.2 is
+	available from ftp://pc.usl.edu/pub/ham/jnosutil/ .
+	It appears that Solaris terminfo structures are incompatible with
+	Solaris curses, so it IS necessary to install ncurses, say into
+	/opt/ncurses-4.2.
+
+2a)	Using version 4.2 (ncurses-4.2.tgz):    (RECOMMENDED)
+		cd $HOME/jnos
+		zcat ncurses-4.2.tgz | tar xvf -
+		cd ncurses-4.2
+		./configure --prefix=/opt/ncurses-4.2
+		make all > make.out 2>&1	(sh/bash/ash)
+	-or-	make all >& make.out		(csh/tcsh)
+		ls -l lib/libncurses.a
+		make install
+
+
+3)	Prepare for the Jnos compilation:
+		cd $HOME/jnos/src
+		cp unixconf.h config.h
+		mv makefile.sol Makefile
+
+	(optional:) Edit config.h to disable undesired features.  The
+	distribution version has almost everything turned on, and will produce
+	a LARGE binary called jnos.  But, see also the comments in Makefile.
+
+	Edit Makefile, setting the proper value for ICURSES and LCURSES.
+	The distribution values assume step (2a) was done, verbatim!
+
+4)	Compile Jnos:
+		make clean
+		make depend		(makedepend prog is in OpenWindows pkg)
+		make > make.out 2>&1	(sh/bash/ash shells)
+	=or=	make >& make.out	(csh/tcsh shells)
+		make mail2ind		(if desired)
+
+	A binary program called jnos will result, and two other utilities,
+	dumpdate and u2j, will be created.  Note that you must edit u2j.c
+	and rerun make, to use it to inject Unix email into the Jnos spool
+	directory for processing by Jnos.  Note also that a large number of
+	compiler complaints may be put into make.out, BUT they are all warnings
+	and the compiler has done the right thing.  Do read the Makefile to
+	see Brandon's comments about this and other issues.  If "make depend"
+	says it can't find the makedepend program, you might need to load it
+	from the OpenWindows package (or just ignore this step and press on).
+
+5)	Prepare a directory to contain the Jnos runtime files, spool
+	directory, etc.  I chose $HOME/jnos.
+	You may wish to copy files from a working MSDOS
+	Jnos install, but be sure to eliminate the CR chars!  If you have a
+        dos2unix command, use it to eliminate the CRs, or perhaps mtools' -t
+        option might help, or as a last resort use: tr -d '\015' <in >outfile.
+        The Jnos help files are distributed with DOS naming conventions, ie,
+        truncated at 8 characters.  Those commands with longer names should
+        either have their helpfile renamed to the full name, or Jnos should
+        be compiled with DOS_NAME_COMPAT #define'd in config.h.  Also note
+	that Jnos will create needed directories itself if they don't
+	already exist.  Into this directory, copy (or symlink) the jnos
+	binary.  You may wish to examine and edit the file "dojnos" which
+	is a script to (eventually) allow Jnos to communicate with Solaris
+	via a slip pseudo-tty link, and then start Jnos.
+
+	In particular, you will want to add asyconfig commands to your
+	autoexec.nos file, to set txqueue and rxqueue values for any serial
+	and pseudo-slip links.   See the asyconf helpfile.  Also, remember
+	to use Solaris naming for COM ports: cua/a and cua/b.  The
+	irq spec on the attach cmd is ignored by Jnos; see the attach
+	helpfile section on Unix attach asy.  If you want Jnos to talk to
+	the Solaris system, and vice versa, you should compile with SLIP
+	#define'd in config.h, and configure a slip interface in Jnos.
+	See the comments and examples in "dojnos".
+
+	Finally, you should have the IP_FORWARDING feature enabled in the
+	Solaris kernel, if you plan to use Solaris as an IP gateway for Jnos.
+	This is normally done in /etc/init.d/inetinit, and can be forced by
+	the command: ndd -set /dev/ip ip_forwarding 1
+
+6)	Jnos will create lock files to prevent simultaneous access to asy
+	devices.  The default Solaris lock directory is /var/spool/locks; if
+	this directory doesn't exist, it probably means your system uses a
+	different directory, perhaps /var/lock.  If this is the case, Jnos
+	will complain about being unable to create a lock file; you should
+	create a symlink /var/spool/locks, pointing to the correct lock dir:
+		cd /var/spool
+		ln -s /var/lock locks
+	The adventurous might instead #define LOCKDIR "/var/lock" in config.h.
+
+7)	If you need a Solaris version of the DOS import.exe, obtain
+	ftp://pc.usl.edu/pub/ham/jnosutil/bmh02src.zip   and build the
+	import program by: unzip -aL bmh02src.zip; make import  .
+	If you want an external mail program which interfaces with the
+	Jnos mail spool, try the "bmh" program in this same zipfile;
+	"make bmh" will compile the bmh program.  Don't forget to configure
+	it in your .bmhrc file.
+
+8)	If you find bugs, please report them to nos-bbs@hydra.carleton.ca,
+	indicating which version of ncurses, gcc, and Jnos were involved.
+	The ncurses version is shown in the "info" command output.  The gcc
+	version is shown by "gcc -v".  Note that if Jnos quits for no apparent
+	reason, you may have encountered a SEGFAULT or other fatal error.
+	If you ran Jnos with the -C option, you may have a file called "core"
+	which contains the state of Jnos at the time of the error.  You can
+	assist me in finding the problem, if you add the following commands'
+	output, contained in the file for.knx, to your report:
+		script for.knx
+		gdb jnos core
+		bt
+		quit
+                exit (or control-D, depending on your shell)
+
+
+-- James Dugal,N5KNX
+jpd@usl.edu
+n5knx@k5arh.#lft.la.usa.noam

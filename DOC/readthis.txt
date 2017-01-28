@@ -1,0 +1,50 @@
+									EZNOS Source Readme
+									-------------------
+
+	EZNOS is derived from JNOS 1.11f, which in turn came from Phil Karn's KA9Q all under the
+GNU/GPL open source licence.
+
+	Directory structure:
+		EZNOS -- ROOT
+		  |
+		  |
+		  |---- Altered, most of the code i've altered from original JNOS
+		  |	|
+		  |	|
+		  |	|---- Config, various config.h formats
+		  |	|
+		  |	|
+		  |	|---- Makefile, various makefile files
+		  |	|
+		  |	|
+		  |	|---- Patches, various patches applied to JNOS
+		  |
+		  |
+		  |---- DOC, various documents included with JNOS
+		  |
+		  |
+		  |---- ORIGINAL, some of the unalter code from JNOS
+
+		  
+	Most the code altered by myself has my initials [ KPK ] next to it, but don't quote me on 
+this, some late nites this didn't happen.
+
+	In general, EZNOS is compiled using Borlandc 3.1. Unzip the EZNOS source code ez_src.zip
+into your borlandc directory. Edit the config.h file to include [define/undef] which modules 
+you want to include in your version of the EZNOS executable.
+	
+	Make sure borlandc\bin is in your path [c:\borlandc\bin]
+	Form DOS or DOS Prompt under Windows
+	CD [ change directory ] to borlandc\eznos
+	type the command MAKE CLEAN
+	type MAKE
+
+Thats it, it should compile without any problems.
+
+That's all Folks,
+	Ken
+	ds_help@blueyonder.co.uk
+		
+P.S.	Include a subject line containing EZNOS or EZNOS, for DOS to make sure I recieve your 
+email.
+  

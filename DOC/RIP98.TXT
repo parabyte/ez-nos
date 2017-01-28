@@ -1,0 +1,201 @@
+
+G8BPQ's RIP 98 for JNOS 1.11d, June 1999.
+------------------------------
+
+RIP 98 protocol support is provided by Jnos, when it is compiled with both
+RIP and RIP98 #define'd.  The code is experimental for the moment, and you
+use it at your own risk !
+
+Enhanced documentation may also be found at:
+
+http://www.rat.org.uk/amrad/rip98v.htm
+
+For most intents and purposes, the JNOS port of the code is identical
+in behaviour to that of TNOS.
+
+Included are bugfixes which 'sort':
+
+ A feature where two Rip Daemons with the 'emit route to ourselves' flag
+ set (02) could create a never ending storm of Rip frames between themselves.
+
+ A crash which could occur if no default route, or route to the sender of
+ a rip request frame existed.
+
+ A possible buffer overrun if RIP 2 with authentication is in use.
+
+Now, about the goodie ......
+
+RIP 98 was originally devised by G8BPQ, probably for use in the "bolt-on
+goodie" IP router for the G8BPQ netrom node, and has quite a few
+outstanding features to recommend it in a the typical amateur radio
+TCP/IP environment:
+
+  Only six bytes are used per entry.
+
+  Variable length subnets are supported.
+
+  No underlying broadcast capable protocol is required.
+
+A bare minimum of information is supplied per entry.  Four address bytes,
+one subnet width (mask) byte, and the metric, making six bytes in total.
+
+Routing information is sent to specific hosts, and not 'broadcast' This
+saves disruption to a radio based network when say a lift occurs, or a
+broadcast is received as a plane flies over, leading to short-lived and
+unreliable routes being propagated through the system.
+
+A RIP 98 daemon written by Jonathan Naylor is also available for the Linux
+operating system, and is included in the 'ax25-utils' package, looked after
+by Jonathan and Terry Dawson.  This can currently be found at:
+ 
+http://www.cs.nott.ac.uk/~jsn/
+
+Since no broadcast capable protocol is required, routing information can be
+exchanged between a RIP 98 capable Linux kernel, and a JNOS equipped with
+RIP 98 over the internal 'slip' link commonly found in setups where JNOS
+runs under Linux.  The benefits of using RIP 98 in this situation is that an
+update to a routing table in one entity is automatically propagated to the
+other, and there is no need to manually update both routing tables.
+
+Within JNOS, the capability exists to refuse versions of RIP lower than a
+certain number.  RIP 1 does not support variable length subnets on the same
+port, and a 'rip reject' command is provided to ensure that incoming rip
+frames can be discarded if they are below the desired version. Since a JNOS
+may wish to act on say, RIP 2 frames, but not RIP 98, an additional command
+has been provided for the paranoid.
+
+rip rip98rx <off|on>  (default is on)
+
+When off, incoming RIP 98 frames are ignored.
+
+The presence of this rip98rx command within the 'rip' submenu indicates that
+your JNOS should be capable of RIP 98 operation.  As well, the info command
+will list RIP-98 protocol support.
+
+Reception of incoming RIP 98 frames:
+------------------------------------
+
+To enable the reception and acting upon of received RIP 98 frames.
+
+In your autoexec.nos, don't forget to 'start rip'.  Make sure that you do
+not set 'rip rip98rx' to 0 (off).
+
+Decide whether you will act upon incoming RIP frames from anyone who can be
+bothered to send them to you, or from the outset, stay restricted to a few
+trusted friends.
+
+In the case of the former. Ensure that 'rip filter' is off.  If there is a
+known local 'bad egg' you can lock their rip frames out with:
+
+rip refuse <ip address> e.g. rip reject 44.128.0.254
+
+If it's just your friends you'd like to receive frames from, use:
+
+rip filter on   and add their ip addresses using:
+
+rip accept <ip address>  e.g. rip accept 44.128.0.253
+
+You can use 'rip accept' and 'rip refuse' a number of times to add multiple
+hosts.  If you get in a twist, a summary of accepted / rejected hosts
+appears when the 'rip status' command is used.
+
+The value of 'rip ttl' sets the 'timeout' value of a rip added route in
+receive, except when you are also sending rip frames to that host.  See
+the later caveat. 
+
+
+Outbound RIP 98 frames:
+-----------------------
+
+Pick your victims.  More than likely as not, they'll be your neighbours
+RF wise (or your Linux kernel), unless you're going to try experimenting
+with some really natty stuff like 'encap' and 'mobile IP' (now there's an
+idea, watch out for RIP 99 !!)
+
+It's a good idea to have a static route already entered for them, because
+if you try to do a 'rip add' to host which is not already in your routing
+table, it tends to get chucked out by RIP.
+
+Please note that the JNOS implementation of RIP 98 does not 'loop back' any
+routing table entry where the receiver of the RIP frame is shown as the
+'gateway' for that entry.
+
+Format of RIP 98 entry:
+
+rip add <dest> <interval> [<flags>] [<ripver>] [AUTH <password>]
+        [RD <routing domain>]
+
+For rip 98, we only make use of the first four fields after 'rip add'
+
+<dest>     The destination address of your mate who's going to receive
+           your RIP 98 frames.
+
+<interval> Time in seconds between RIP updates to this station.
+
+A caveat applies here.  Normally we'd expect the 'timeout time' of a route
+sent to us by anyone to be the value of 'rip ttl'.  If we have a route set
+up to this host, the timeout value becomes the *outgoing* time interval
+multiplied by four, so you can see that it's good practice to have the same
+value of 'interval' used between two hosts.  If your friend sends you their
+table once an hour, and you decide to send once every five minutes, your
+partner's routes will start to vanish from your table after 20 minutes !
+(RIP first applies a metric of '16' to the route, before banishing it
+completely. If an update is received during this 'hold-down' period, it is
+ignored)
+
+[<flags>]  The (lucky) flag value I've been using is 13.  It is actually
+           the 'hex' value of the flags you input, straight, without any
+           '0x' business.
+
+As KA9Q is an "engineer's" stack, here are the values that make up the flag
+for those who 'must play' - particularly with split horizon.
+
+01 Split Horizon Processing - Omit all routes which are on the same
+   interface as the 'victim host' of your RIP frames. (but see poison
+   reverse).
+
+02 Include our own host as a destination in the RIP transmissions.
+
+04 Broadcast (We don't want to broadcast with RIP 98 - so 0).
+
+08 Multicast (and 0 again !).
+
+10 Poison Reverse - If split horizon is in use, rather than omit entries
+   on the same port as the RIP transmission, send them marked with a
+   metric of 16 in response to a 'triggered update' - like where something
+   has changed in our routing table.
+
+20 Authentication in use (0 with RIP 98).
+
+[<ripver>] The version of RIP to be used when sending RIP frames to that
+           host.  Try using 98 to get the best results with RIP 98 !
+
+To send RIP 98 frames every half an hour to a host using a test address,
+I might use:
+
+rip add 44.128.131.252 1800 13 98
+
+The best place for 'rip add' lines is probably near the end of your
+autoexec.nos after the routes have been added, and the rip server started.
+
+Beginners may wish to start by making sure that 'rip merge' is off. This can
+help you decipher exactly what is going on in your routing table should
+'Murphy' intervene.
+
+If you're using the Linux RIP 98 daemon to play with, just a little
+observation on a feature observed within it.  I've noticed that a 'more
+specific' route can get gobbled up by a less specific one when the latter's
+metric is smaller, or the same.  It's a good idea to give "catch most"
+routes like 44.0.0.0/8 a higher metric than the highest of those locally
+seen in use.
+
+I would just like to thank John Wiseman, G8BPQ; Jonathan Naylor, G4KLX and
+David Mackay, G4HJG for providing a good reason to waste one Easter weekend.
+The devil does indeed find work for idle hands.
+ 
+73, Gareth Rowlands, G4HIP
+
+internet: gareth@lightfox.demon.co.uk
+amprnet : g4hip@gb7bbc.ampr.org
+AX25 BBS: G4HIP@GB7BBC.GB7HSN.#32.GBR.EU
+ 
